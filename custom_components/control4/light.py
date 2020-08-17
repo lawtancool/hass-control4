@@ -39,11 +39,6 @@ async def async_setup_entry(
         "Scan interval = %s", scan_interval,
     )
 
-    # TODO: remove this
-    director = entry_data[CONF_DIRECTOR]
-    full_item_list = await director.getAllItemInfo()
-    _LOGGER.error("Full item list: %s", full_item_list)
-
     async def async_update_data_non_dimmer():
         """Fetch data from Control4 director for non-dimmer lights."""
         try:
@@ -93,8 +88,12 @@ async def async_setup_entry(
                 else:
                     director = entry_data[CONF_DIRECTOR]
                     item_variables = await director.getItemVariables(item_id)
-                    _LOGGER.error(
-                        "Couldn't get light state data for %s, skipping setup. Available item variables: %s",
+                    _LOGGER.warning(
+                        "Couldn't get light state data for %s, skipping setup",
+                        item_name,
+                    )
+                    _LOGGER.debug(
+                        "Couldn't get light state data for %s, skipping setup. Available variables from Control4: %s",
                         item_name,
                         item_variables,
                     )
@@ -128,7 +127,7 @@ async def async_setup_entry(
                 )
         except KeyError as exception:
             _LOGGER.error(
-                "Unknown device properties recieved from Control4: %s %s",
+                "Unknown device properties received from Control4: %s %s",
                 exception,
                 item,
             )
