@@ -45,7 +45,8 @@ async def async_setup_entry(
     entry_data = hass.data[DOMAIN][entry.entry_id]
     scan_interval = entry_data[CONF_SCAN_INTERVAL]
     _LOGGER.debug(
-        "Scan interval = %s", scan_interval,
+        "Scan interval = %s",
+        scan_interval,
     )
 
     async def async_update_data():
@@ -53,7 +54,7 @@ async def async_setup_entry(
         try:
             return await director_update_data(hass, entry, CONTROL4_SENSOR_VAR)
         except C4Exception as err:
-            raise UpdateFailed(f"Error communicating with API: {err}")
+            raise UpdateFailed(f"Error communicating with API: {err}") from err
 
     coordinator = DataUpdateCoordinator(
         hass,
