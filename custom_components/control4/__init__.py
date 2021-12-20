@@ -35,7 +35,6 @@ from .const import (
     CONF_DIRECTOR_ALL_ITEMS,
     CONF_DIRECTOR_MODEL,
     CONF_DIRECTOR_SW_VERSION,
-    CONF_DIRECTOR_TOKEN_EXPIRATION,
     CONF_WEBSOCKET,
     DOMAIN,
 )
@@ -62,6 +61,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     websocket = C4Websocket(
         config[CONF_HOST], director.director_bearer_token, websocket_session
     )
+    # Silence C4Websocket related loggers, that would otherwise spam INFO logs with debugging messages
+    logging.getLogger("socketio.client").setLevel(logging.WARNING)
+    logging.getLogger("engineio.client").setLevel(logging.WARNING)
+    logging.getLogger("charset_normalizer").setLevel(logging.ERROR)
     entry_data[CONF_WEBSOCKET] = websocket
     await websocket.sio_connect()
 
@@ -124,7 +127,7 @@ async def get_items_of_category(hass: HomeAssistant, entry: ConfigEntry, categor
 
 
 async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
-    """Store updated authentication and director tokens in hass.data."""
+    """Store updated authentication and director tokens in hass.data, and schedule next token refresh."""
     config = entry.data
     account_session = aiohttp_client.async_get_clientsession(hass)
 
@@ -153,18 +156,25 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
     entry_data = hass.data[DOMAIN][entry.entry_id]
     entry_data[CONF_ACCOUNT] = account
     entry_data[CONF_DIRECTOR] = director
-    entry_data[CONF_DIRECTOR_TOKEN_EXPIRATION] = director_token_dict["validSeconds"]
-    callable_partial = partial(refresh_tokens_callable, hass, entry)
+    obj = RefreshTokensObject(hass, entry)
     async_call_later(
-        hass,
-        entry_data[CONF_DIRECTOR_TOKEN_EXPIRATION],
-        callable_partial,
+        hass=hass,
+        delay=director_token_dict["validSeconds"],
+        action=obj.refresh_tokens,
     )
 
 
-def refresh_tokens_callable(hass: HomeAssistant, entry: ConfigEntry) -> Callable:
-    """Callable wrapper of refresh_tokens()."""
-    return asyncio.run(refresh_tokens(hass, entry))
+class RefreshTokensObject:
+    """Object that provides a callable to refresh tokens."""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        self.hass = hass
+        self.entry = entry
+
+    async def refresh_tokens(self, datetime):
+        """Calls refresh_tokens() to store updated authentication and director tokens in hass.data."""
+        # unused datetime parameter is required, since Home Assistant will pass a datetime.datetime object as parameter when calling this function via async_call_later()
+        return await refresh_tokens(self.hass, self.entry)
 
 
 class Control4Entity(Entity):
@@ -199,17 +209,29 @@ class Control4Entity(Entity):
         self._extra_state_attributes = device_attributes
 
     async def async_added_to_hass(self):
-        """Sync with HASS."""
+        """Add entity to hass, adding Websockets callbacks to receive entity state updates from Control4."""
         await super().async_added_to_hass()
         await self.hass.async_add_executor_job(
             self.entry_data[CONF_WEBSOCKET].add_device_callback,
             self._idx,
             self._update_callback,
         )
-        _LOGGER.debug("Registering device %s for callback", self._device_id)
+        _LOGGER.debug("Registering item id %s for callback", self._idx)
+        await self.hass.async_add_executor_job(
+            self.entry_data[CONF_WEBSOCKET].add_device_callback,
+            self._device_id,
+            self._update_callback,
+        )
+        _LOGGER.debug(
+            "Registering parent device %s of item id %s for callback",
+            self._device_id,
+            self._idx,
+        )
         return True
 
     async def _update_callback(self, device, message):
+        """Callback called when a Websocket update is received for our item id or parent device id.
+        Updates state attributes in hass."""
         _LOGGER.debug(message)
 
         if message["evtName"] == "OnDataToUI":
