@@ -26,6 +26,7 @@ from homeassistant.helpers.event import async_call_later
 
 from .const import (
     CONF_ACCOUNT,
+    CONF_CANCEL_TOKEN_REFRESH_CALLBACK,
     CONF_CONTROLLER_UNIQUE_ID,
     CONF_DIRECTOR,
     CONF_DIRECTOR_ALL_ITEMS,
@@ -88,6 +89,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry_data = hass.data[DOMAIN][entry.entry_id]
     _LOGGER.debug("Disconnecting C4Websocket for config entry unload")
     await entry_data[CONF_WEBSOCKET].sio_disconnect()
+    _LOGGER.debug("Cancelling scheduled token refresh for config entry unload")
+    entry_data[CONF_CANCEL_TOKEN_REFRESH_CALLBACK]()
 
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
@@ -115,13 +118,8 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
     try:
         await account.getAccountBearerToken()
     except client_exceptions.ClientError as exception:
-        _LOGGER.error("Error connecting to Control4 account API: %s", exception)
-        raise ConfigEntryNotReady from exception
+        raise ConfigEntryNotReady(exception) from exception
     except BadCredentials as exception:
-        _LOGGER.error(
-            "Error authenticating with Control4 account API, incorrect username or password: %s",
-            exception,
-        )
         raise ConfigEntryAuthFailed(exception) from exception
 
     controller_unique_id = config[CONF_CONTROLLER_UNIQUE_ID]
@@ -166,7 +164,7 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
         director_token_dict["validSeconds"],
     )
     obj = RefreshTokensObject(hass, entry)
-    async_call_later(
+    entry_data[CONF_CANCEL_TOKEN_REFRESH_CALLBACK] = async_call_later(
         hass=hass,
         delay=director_token_dict["validSeconds"],
         action=obj.refresh_tokens,
@@ -185,25 +183,27 @@ class C4WebsocketConnectionTracker:
 
     async def connect_callback(self) -> None:
         """Manually refresh entity states when the Websocket is reconnected after a connection drop."""
-        if self._was_disconnected:
-            _LOGGER.info("Websocket connection to Control4 reestablished")
+        if not self._was_disconnected:
+            return
 
-            # Refresh state of entities so they are not unavailable anymore
-            item_callbacks = self.hass.data[DOMAIN][self.entry.entry_id][
-                CONF_WEBSOCKET
-            ].item_callbacks
-            for item_id, callback in item_callbacks.items():
-                item_attributes = await director_get_entry_variables(
-                    self.hass, self.entry, item_id
-                )
-                message = {
-                    "evtName": "OnDataToUI",
-                    "iddevice": item_id,
-                    "data": item_attributes,
-                }
-                await callback(item_id, message)
+        _LOGGER.info("Websocket connection to Control4 reestablished")
 
-            self._was_disconnected = False
+        # Refresh state of entities so they are not unavailable anymore
+        item_callbacks = self.hass.data[DOMAIN][self.entry.entry_id][
+            CONF_WEBSOCKET
+        ].item_callbacks
+        for item_id, callback in item_callbacks.items():
+            item_attributes = await director_get_entry_variables(
+                self.hass, self.entry, item_id
+            )
+            message = {
+                "evtName": "OnDataToUI",
+                "iddevice": item_id,
+                "data": item_attributes,
+            }
+            await callback(item_id, message)
+
+        self._was_disconnected = False
 
     async def disconnect_callback(self) -> None:
         """Detect a Websocket connection loss."""
