@@ -21,11 +21,14 @@
     },
     "options": {
         "step": {
-            "init": {
-                "data": {
-                    "scan_interval": "Seconds between updates"
-                }
+          "init": {
+            "data": {
+              "alarm_home_mode": "Alarm arm home mode name",
+              "alarm_away_mode": "Alarm arm away mode name",
+              "alarm_night_mode": "Alarm arm night mode name",
+              "alarm_custom_bypass_mode": "Alarm arm custom bypass mode name"
             }
+          }
         }
-    }
+      }
 }
