@@ -213,6 +213,35 @@ class Control4BinarySensor(Control4Entity, BinarySensorEntity):
         )
         self._device_class = device_class
         self._extra_state_attributes["alarm_zone_id"] = alarm_zone_id
+        self._extra_state_attributes["ContactState"] = bool(
+            self._extra_state_attributes["ContactState"]
+        )
+        self._extra_state_attributes["StateVerified"] = bool(
+            self._extra_state_attributes["StateVerified"]
+        )
+
+    async def _update_callback(self, device, message):
+        """Update state attributes in hass after receiving a Websocket update for our item id/parent device id."""
+        _LOGGER.debug(message)
+
+        # Message will be False when a Websocket disconnect is detected
+        if message is False:
+            self._attr_available = False
+        elif message["evtName"] == "OnDataToUI":
+            self._attr_available = True
+            data = message["data"]
+            # Extra handling for alarm specific messages
+            if "contact_state" in data:
+                self._extra_state_attributes["ContactState"] = bool(
+                    data["contact_state"].pop("current_state") == "CLOSED"
+                )
+                self._extra_state_attributes["StateVerified"] = data[
+                    "contact_state"
+                ].pop("is_verified")
+                self._extra_state_attributes["LastActionTime"] = message["time"]
+                await self._data_to_extra_state_attributes(data["contact_state"])
+        _LOGGER.debug("Message for device %s", device)
+        self.schedule_update_ha_state()
 
     @property
     def is_on(self):
@@ -220,8 +249,6 @@ class Control4BinarySensor(Control4Entity, BinarySensorEntity):
         # In Control4, True = closed/clear and False = open/not clear
         # For some reason, Control4 gives us ContactState on entity init,
         # but updates STATE when changes occur (the value of ContactState is never updated)
-        if "STATE" in self.extra_state_attributes:
-            return not bool(self.extra_state_attributes["STATE"])
         return not bool(self.extra_state_attributes["ContactState"])
 
     @property

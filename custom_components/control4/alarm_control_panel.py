@@ -65,6 +65,12 @@ CONTROL4_LAST_ARM_FAILURE_VAR = "LAST_ARM_FAILED"
 CONTROL4_EXIT_DELAY_STATE = "EXIT_DELAY"
 CONTROL4_ENTRY_DELAY_STATE = "ENTRY_DELAY"
 
+CONTROL4_PARTITION_STATE_DATA_MAPPING = {
+    "state": "PARTITION_STATE",
+    "trouble": "TROUBLE_TEXT",
+    "text": "DISPLAY_TEXT",
+}
+
 
 # async def async_setup_entry(
 #     hass: HomeAssistant, entry: ConfigEntry, async_add_entities
@@ -268,6 +274,42 @@ class Control4AlarmControlPanel(Control4Entity, AlarmControlPanelEntity):
             device_attributes,
         )
         self._is_enabled = is_enabled
+        self._extra_state_attributes["zone_state"] = {}
+
+    async def _update_callback(self, device, message):
+        """Update state attributes in hass after receiving a Websocket update for our item id/parent device id."""
+        _LOGGER.debug(message)
+
+        # Message will be False when a Websocket disconnect is detected
+        if message is False:
+            self._attr_available = False
+        elif message["evtName"] == "OnDataToUI":
+            self._attr_available = True
+            data = message["data"]
+            # Extra handling for alarm specific messages
+            if "partition_state" in data:
+                data = data["partition_state"]
+                for key, value in data:
+                    if key in CONTROL4_PARTITION_STATE_DATA_MAPPING:
+                        self._extra_state_attributes[
+                            CONTROL4_PARTITION_STATE_DATA_MAPPING[key]
+                        ] = value
+                    else:
+                        self._extra_state_attributes[key.upper()] = value
+            elif "text" in data:
+                self._extra_state_attributes[
+                    CONTROL4_PARTITION_STATE_DATA_MAPPING["text"]
+                ] = data["text"]
+            elif "zone_state" in data:
+                data = data["zone_state"]
+                self._extra_state_attributes["zone_state"][data["id"]] = data
+            elif "devicecommand" in data:
+                data = data["devicecommand"]["params"]
+                await self._data_to_extra_state_attributes(data)
+            else:
+                await self._data_to_extra_state_attributes(data)
+        _LOGGER.debug("Message for device %s", device)
+        self.schedule_update_ha_state()
 
     def create_api_object(self):
         """Create a pyControl4 device object.

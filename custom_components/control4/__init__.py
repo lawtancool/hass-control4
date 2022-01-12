@@ -323,14 +323,17 @@ class Control4Entity(Entity):
 
     async def async_will_remove_from_hass(self) -> None:
         """Entity being removed from hass. Unregister Control4 Websockets callbacks for this entity."""
-        _LOGGER.debug("Deregistering callback for item id %s", self._idx)
-        self.entry_data[CONF_WEBSOCKET].remove_item_callback(self._idx)
-        _LOGGER.debug(
-            "Deregistering callback for parent device %s of item id %s",
-            self._device_id,
-            self._idx,
-        )
-        self.entry_data[CONF_WEBSOCKET].remove_item_callback(self._device_id)
+        try:
+            _LOGGER.debug("Deregistering callback for item id %s", self._idx)
+            self.entry_data[CONF_WEBSOCKET].remove_item_callback(self._idx)
+            _LOGGER.debug(
+                "Deregistering callback for parent device %s of item id %s",
+                self._device_id,
+                self._idx,
+            )
+            self.entry_data[CONF_WEBSOCKET].remove_item_callback(self._device_id)
+        except KeyError:
+            return
 
     async def _update_callback(self, device, message):
         """Update state attributes in hass after receiving a Websocket update for our item id/parent device id."""
@@ -342,15 +345,19 @@ class Control4Entity(Entity):
         elif message["evtName"] == "OnDataToUI":
             self._attr_available = True
             data = message["data"]
-            if isinstance(data, dict):
-                for key, value in data.items():
-                    if isinstance(value, dict):
-                        for k, val in value.items():
-                            self._extra_state_attributes[k] = val
-                    else:
-                        self._extra_state_attributes[key.upper()] = value
+            await self._data_to_extra_state_attributes(data)
         _LOGGER.debug("Message for device %s", device)
         self.schedule_update_ha_state()
+
+    async def _data_to_extra_state_attributes(self, data) -> None:
+        """Load data from Websocket update into extra_state_attributes."""
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if isinstance(value, dict):
+                    for k, val in value.items():
+                        self._extra_state_attributes[k] = val
+                else:
+                    self._extra_state_attributes[key.upper()] = value
 
     @property
     def device_info(self) -> DeviceInfo:
