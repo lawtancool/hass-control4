@@ -26,20 +26,29 @@ from homeassistant.helpers.event import async_call_later
 
 from .const import (
     CONF_ACCOUNT,
+    CONF_ALARM_AWAY_MODE,
+    CONF_ALARM_CUSTOM_BYPASS_MODE,
+    CONF_ALARM_HOME_MODE,
+    CONF_ALARM_NIGHT_MODE,
     CONF_CANCEL_TOKEN_REFRESH_CALLBACK,
+    CONF_CONFIG_LISTENER,
     CONF_CONTROLLER_UNIQUE_ID,
     CONF_DIRECTOR,
     CONF_DIRECTOR_ALL_ITEMS,
     CONF_DIRECTOR_MODEL,
     CONF_DIRECTOR_SW_VERSION,
     CONF_WEBSOCKET,
+    DEFAULT_ALARM_AWAY_MODE,
+    DEFAULT_ALARM_CUSTOM_BYPASS_MODE,
+    DEFAULT_ALARM_HOME_MODE,
+    DEFAULT_ALARM_NIGHT_MODE,
     DOMAIN,
 )
 from .director_utils import director_get_entry_variables
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.LIGHT]
+PLATFORMS = [Platform.LIGHT, Platform.ALARM_CONTROL_PANEL, Platform.BINARY_SENSOR]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -77,6 +86,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     director_all_items = json.loads(director_all_items)
     entry_data[CONF_DIRECTOR_ALL_ITEMS] = director_all_items
 
+    # Load options from config entry
+    entry_data[CONF_ALARM_AWAY_MODE] = entry.options.get(
+        CONF_ALARM_AWAY_MODE, DEFAULT_ALARM_AWAY_MODE
+    )
+    entry_data[CONF_ALARM_HOME_MODE] = entry.options.get(
+        CONF_ALARM_HOME_MODE, DEFAULT_ALARM_HOME_MODE
+    )
+    entry_data[CONF_ALARM_NIGHT_MODE] = entry.options.get(
+        CONF_ALARM_NIGHT_MODE, DEFAULT_ALARM_NIGHT_MODE
+    )
+    entry_data[CONF_ALARM_CUSTOM_BYPASS_MODE] = entry.options.get(
+        CONF_ALARM_CUSTOM_BYPASS_MODE, DEFAULT_ALARM_CUSTOM_BYPASS_MODE
+    )
+
+    entry_data[CONF_CONFIG_LISTENER] = entry.add_update_listener(update_listener)
+
     hass.config_entries.async_setup_platforms(entry, PLATFORMS)
 
     return True
@@ -97,6 +122,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.debug("Unloaded entry for %s", entry.entry_id)
 
     return unload_ok
+
+
+async def update_listener(hass, config_entry):
+    """Update when config_entry options update."""
+    _LOGGER.debug("Config entry was updated, rerunning setup")
+    await hass.config_entries.async_reload(config_entry.entry_id)
 
 
 async def get_items_of_category(hass: HomeAssistant, entry: ConfigEntry, category: str):
@@ -264,6 +295,8 @@ class Control4Entity(Entity):
         self._device_id = device_id
         self._device_area = device_area
         self._extra_state_attributes = device_attributes
+        self._extra_state_attributes["item id"] = idx
+        self._extra_state_attributes["parent item id"] = device_id
         # Disable polling
         self._attr_should_poll = False
 
