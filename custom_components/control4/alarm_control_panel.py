@@ -22,7 +22,9 @@ from homeassistant.components.alarm_control_panel.const import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     STATE_ALARM_ARMED_AWAY,
+    STATE_ALARM_ARMED_CUSTOM_BYPASS,
     STATE_ALARM_ARMED_HOME,
+    STATE_ALARM_ARMED_NIGHT,
     STATE_ALARM_ARMING,
     STATE_ALARM_DISARMED,
     STATE_ALARM_PENDING,
@@ -64,6 +66,8 @@ CONTROL4_LAST_ARM_FAILURE_VAR = "LAST_ARM_FAILED"
 
 CONTROL4_EXIT_DELAY_STATE = "EXIT_DELAY"
 CONTROL4_ENTRY_DELAY_STATE = "ENTRY_DELAY"
+CONTROL4_ARMED_STATE = "ARMED"
+CONTROL4_DISARMED_NOT_READY_STATE = "DISARMED_NOT_READY"
 
 CONTROL4_PARTITION_STATE_DATA_MAPPING = {
     "state": "PARTITION_STATE",
@@ -289,7 +293,7 @@ class Control4AlarmControlPanel(Control4Entity, AlarmControlPanelEntity):
             # Extra handling for alarm specific messages
             if "partition_state" in data:
                 data = data["partition_state"]
-                for key, value in data:
+                for key, value in data.items():
                     if key in CONTROL4_PARTITION_STATE_DATA_MAPPING:
                         self._extra_state_attributes[
                             CONTROL4_PARTITION_STATE_DATA_MAPPING[key]
@@ -350,20 +354,32 @@ class Control4AlarmControlPanel(Control4Entity, AlarmControlPanelEntity):
             return STATE_ALARM_ARMING
         if partition_state == CONTROL4_ENTRY_DELAY_STATE:
             return STATE_ALARM_PENDING
+        if partition_state == CONTROL4_DISARMED_NOT_READY_STATE:
+            return STATE_ALARM_DISARMED
+        if partition_state == CONTROL4_ARMED_STATE:
+            armed_type = self.extra_state_attributes[CONTROL4_ARMED_TYPE_VAR]
+            if armed_type == self.entry_data[CONF_ALARM_AWAY_MODE]:
+                return STATE_ALARM_ARMED_AWAY
+            if armed_type == self.entry_data[CONF_ALARM_HOME_MODE]:
+                return STATE_ALARM_ARMED_HOME
+            if armed_type == self.entry_data[CONF_ALARM_NIGHT_MODE]:
+                return STATE_ALARM_ARMED_NIGHT
+            if armed_type == self.entry_data[CONF_ALARM_CUSTOM_BYPASS_MODE]:
+                return STATE_ALARM_ARMED_CUSTOM_BYPASS
 
-        alarm_state = bool(self.extra_state_attributes[CONTROL4_ALARM_STATE_VAR])
+        alarm_state = self.extra_state_attributes[CONTROL4_ALARM_TYPE_VAR]
         if alarm_state:
             return STATE_ALARM_TRIGGERED
 
-        disarmed = self.extra_state_attributes[CONTROL4_DISARMED_VAR]
-        armed_home = self.extra_state_attributes[CONTROL4_ARMED_HOME_VAR]
-        armed_away = self.extra_state_attributes[CONTROL4_ARMED_AWAY_VAR]
-        if disarmed == 1:
-            return STATE_ALARM_DISARMED
-        if armed_home == 1:
-            return STATE_ALARM_ARMED_HOME
-        if armed_away == 1:
-            return STATE_ALARM_ARMED_AWAY
+        # disarmed = self.extra_state_attributes[CONTROL4_DISARMED_VAR]
+        # armed_home = self.extra_state_attributes[CONTROL4_ARMED_HOME_VAR]
+        # armed_away = self.extra_state_attributes[CONTROL4_ARMED_AWAY_VAR]
+        # if disarmed == 1:
+        #     return STATE_ALARM_DISARMED
+        # if armed_home == 1:
+        #     return STATE_ALARM_ARMED_HOME
+        # if armed_away == 1:
+        #     return STATE_ALARM_ARMED_AWAY
 
     # @property
     # def device_state_attributes(self):
