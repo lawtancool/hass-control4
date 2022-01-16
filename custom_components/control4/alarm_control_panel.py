@@ -340,15 +340,15 @@ class Control4AlarmControlPanel(Control4Entity, AlarmControlPanelEntity):
     def supported_features(self) -> int:
         """Flag supported features."""
         flags = 0
-        if self.entry_data[CONF_ALARM_AWAY_MODE] is not None:
+        if not self.entry_data[CONF_ALARM_AWAY_MODE] == "":
             flags |= SUPPORT_ALARM_ARM_AWAY
-        if self.entry_data[CONF_ALARM_HOME_MODE] is not None:
+        if not self.entry_data[CONF_ALARM_HOME_MODE] == "":
             flags |= SUPPORT_ALARM_ARM_HOME
-        if self.entry_data[CONF_ALARM_NIGHT_MODE] is not None:
+        if not self.entry_data[CONF_ALARM_NIGHT_MODE] == "":
             flags |= SUPPORT_ALARM_ARM_NIGHT
-        if self.entry_data[CONF_ALARM_CUSTOM_BYPASS_MODE] is not None:
+        if not self.entry_data[CONF_ALARM_CUSTOM_BYPASS_MODE] == "":
             flags |= SUPPORT_ALARM_ARM_CUSTOM_BYPASS
-        if self.entry_data[CONF_ALARM_VACATION_MODE] is not None:
+        if not self.entry_data[CONF_ALARM_VACATION_MODE] == "":
             flags |= SUPPORT_ALARM_ARM_VACATION
         return flags
 
@@ -360,7 +360,10 @@ class Control4AlarmControlPanel(Control4Entity, AlarmControlPanelEntity):
             return STATE_ALARM_ARMING
         if partition_state == CONTROL4_ENTRY_DELAY_STATE:
             return STATE_ALARM_PENDING
-        if (partition_state == CONTROL4_DISARMED_NOT_READY_STATE or partition_state == CONTROL4_DISARMED_READY_STATE):
+        if (
+            partition_state == CONTROL4_DISARMED_NOT_READY_STATE
+            or partition_state == CONTROL4_DISARMED_READY_STATE
+        ):
             return STATE_ALARM_DISARMED
         if partition_state == CONTROL4_ARMED_STATE:
             armed_type = self.extra_state_attributes[CONTROL4_ARMED_TYPE_VAR]
