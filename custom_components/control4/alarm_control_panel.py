@@ -18,6 +18,7 @@ from homeassistant.components.alarm_control_panel import (
 from homeassistant.components.alarm_control_panel.const import (
     SUPPORT_ALARM_ARM_CUSTOM_BYPASS,
     SUPPORT_ALARM_ARM_NIGHT,
+    SUPPORT_ALARM_ARM_VACATION,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
@@ -25,6 +26,7 @@ from homeassistant.const import (
     STATE_ALARM_ARMED_CUSTOM_BYPASS,
     STATE_ALARM_ARMED_HOME,
     STATE_ALARM_ARMED_NIGHT,
+    STATE_ALARM_ARMED_VACATION,
     STATE_ALARM_ARMING,
     STATE_ALARM_DISARMED,
     STATE_ALARM_PENDING,
@@ -40,6 +42,7 @@ from .const import (
     CONF_ALARM_CUSTOM_BYPASS_MODE,
     CONF_ALARM_HOME_MODE,
     CONF_ALARM_NIGHT_MODE,
+    CONF_ALARM_VACATION_MODE,
     CONF_DIRECTOR,
     CONTROL4_ENTITY_TYPE,
     DOMAIN,
@@ -68,6 +71,7 @@ CONTROL4_EXIT_DELAY_STATE = "EXIT_DELAY"
 CONTROL4_ENTRY_DELAY_STATE = "ENTRY_DELAY"
 CONTROL4_ARMED_STATE = "ARMED"
 CONTROL4_DISARMED_NOT_READY_STATE = "DISARMED_NOT_READY"
+CONTROL4_DISARMED_READY_STATE = "DISARMED_READY"
 
 CONTROL4_PARTITION_STATE_DATA_MAPPING = {
     "state": "PARTITION_STATE",
@@ -344,6 +348,8 @@ class Control4AlarmControlPanel(Control4Entity, AlarmControlPanelEntity):
             flags |= SUPPORT_ALARM_ARM_NIGHT
         if self.entry_data[CONF_ALARM_CUSTOM_BYPASS_MODE] is not None:
             flags |= SUPPORT_ALARM_ARM_CUSTOM_BYPASS
+        if self.entry_data[CONF_ALARM_VACATION_MODE] is not None:
+            flags |= SUPPORT_ALARM_ARM_VACATION
         return flags
 
     @property
@@ -354,7 +360,7 @@ class Control4AlarmControlPanel(Control4Entity, AlarmControlPanelEntity):
             return STATE_ALARM_ARMING
         if partition_state == CONTROL4_ENTRY_DELAY_STATE:
             return STATE_ALARM_PENDING
-        if partition_state == CONTROL4_DISARMED_NOT_READY_STATE:
+        if (partition_state == CONTROL4_DISARMED_NOT_READY_STATE or partition_state == CONTROL4_DISARMED_READY_STATE):
             return STATE_ALARM_DISARMED
         if partition_state == CONTROL4_ARMED_STATE:
             armed_type = self.extra_state_attributes[CONTROL4_ARMED_TYPE_VAR]
@@ -366,6 +372,8 @@ class Control4AlarmControlPanel(Control4Entity, AlarmControlPanelEntity):
                 return STATE_ALARM_ARMED_NIGHT
             if armed_type == self.entry_data[CONF_ALARM_CUSTOM_BYPASS_MODE]:
                 return STATE_ALARM_ARMED_CUSTOM_BYPASS
+            if armed_type == self.entry_data[CONF_ALARM_VACATION_MODE]:
+                return STATE_ALARM_ARMED_VACATION
 
         alarm_state = self.extra_state_attributes[CONTROL4_ALARM_TYPE_VAR]
         if alarm_state:
@@ -415,14 +423,19 @@ class Control4AlarmControlPanel(Control4Entity, AlarmControlPanelEntity):
         await c4_alarm.setArm(code, self.entry_data[CONF_ALARM_HOME_MODE])
 
     async def async_alarm_arm_night(self, code=None):
-        """Send arm home command."""
+        """Send arm night command."""
         c4_alarm = self.create_api_object()
         await c4_alarm.setArm(code, self.entry_data[CONF_ALARM_NIGHT_MODE])
 
     async def async_alarm_arm_custom_bypass(self, code=None):
-        """Send arm home command."""
+        """Send arm custom bypass command."""
         c4_alarm = self.create_api_object()
         await c4_alarm.setArm(code, self.entry_data[CONF_ALARM_CUSTOM_BYPASS_MODE])
+
+    async def async_alarm_arm_vacation(self, code=None):
+        """Send arm vacation command."""
+        c4_alarm = self.create_api_object()
+        await c4_alarm.setArm(code, self.entry_data[CONF_ALARM_VACATION_MODE])
 
     async def async_alarm_disarm(self, code=None):
         """Send disarm command."""

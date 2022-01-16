@@ -19,11 +19,13 @@ from .const import (
     CONF_ALARM_CUSTOM_BYPASS_MODE,
     CONF_ALARM_HOME_MODE,
     CONF_ALARM_NIGHT_MODE,
+    CONF_ALARM_VACATION_MODE,
     CONF_CONTROLLER_UNIQUE_ID,
     DEFAULT_ALARM_AWAY_MODE,
     DEFAULT_ALARM_CUSTOM_BYPASS_MODE,
     DEFAULT_ALARM_HOME_MODE,
     DEFAULT_ALARM_NIGHT_MODE,
+    DEFAULT_ALARM_VACATION_MODE,
     DOMAIN,
 )
 
@@ -214,7 +216,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         CONF_ALARM_CUSTOM_BYPASS_MODE, DEFAULT_ALARM_CUSTOM_BYPASS_MODE
                     ),
                 ): str,
-            }
+                vol.Optional(
+                    CONF_ALARM_VACATION_MODE,
+                    default=self.config_entry.options.get(
+                        CONF_ALARM_VACATION_MODE, DEFAULT_ALARM_VACATION_MODE
+                    ),
+                ): str,
+            }, required=False
         )
         return self.async_show_form(step_id="init", data_schema=data_schema)
 

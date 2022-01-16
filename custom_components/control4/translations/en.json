@@ -20,15 +20,16 @@
         }
     },
     "options": {
-        "step": {
-          "init": {
-            "data": {
-              "alarm_home_mode": "Alarm arm home mode name",
-              "alarm_away_mode": "Alarm arm away mode name",
-              "alarm_night_mode": "Alarm arm night mode name",
-              "alarm_custom_bypass_mode": "Alarm arm custom bypass mode name"
-            }
+      "step": {
+        "init": {
+          "data": {
+            "alarm_home_mode": "Alarm arm home mode name",
+            "alarm_away_mode": "Alarm arm away mode name",
+            "alarm_night_mode": "Alarm arm night mode name",
+            "alarm_custom_bypass_mode": "Alarm arm custom bypass mode name",
+            "alarm_vacation_mode": "Alarm arm vacation mode name"
           }
         }
       }
+    }
 }
