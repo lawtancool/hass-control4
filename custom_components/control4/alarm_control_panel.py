@@ -38,6 +38,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from . import Control4Entity, get_items_of_category
 from .const import (
+    CONF_ALARM_ARM_STATES,
     CONF_ALARM_AWAY_MODE,
     CONF_ALARM_CUSTOM_BYPASS_MODE,
     CONF_ALARM_HOME_MODE,
@@ -45,6 +46,11 @@ from .const import (
     CONF_ALARM_VACATION_MODE,
     CONF_DIRECTOR,
     CONTROL4_ENTITY_TYPE,
+    DEFAULT_ALARM_AWAY_MODE,
+    DEFAULT_ALARM_CUSTOM_BYPASS_MODE,
+    DEFAULT_ALARM_HOME_MODE,
+    DEFAULT_ALARM_NIGHT_MODE,
+    DEFAULT_ALARM_VACATION_MODE,
     DOMAIN,
 )
 from .director_utils import director_get_entry_variables
@@ -203,6 +209,10 @@ async def async_setup_entry(
     for item in items_of_category:
         try:
             if item["type"] == CONTROL4_ENTITY_TYPE and item["id"]:
+                if "capabilities" in item and "arm_states" in item["capabilities"]:
+                    entry_data[CONF_ALARM_ARM_STATES].update(
+                        item["capabilities"]["arm_states"].split(",")
+                    )
                 item_name = str(item["name"])
                 item_id = item["id"]
                 item_area = item["roomName"]
@@ -223,9 +233,10 @@ async def async_setup_entry(
                         item_model = parent_item["model"]
             else:
                 continue
-        except KeyError:
+        except KeyError as exception:
             _LOGGER.warning(
-                "Unknown device properties received from Control4: %s",
+                "Unknown device properties received from Control4: %s %s",
+                exception,
                 item,
             )
             continue
@@ -340,15 +351,18 @@ class Control4AlarmControlPanel(Control4Entity, AlarmControlPanelEntity):
     def supported_features(self) -> int:
         """Flag supported features."""
         flags = 0
-        if not self.entry_data[CONF_ALARM_AWAY_MODE] == "":
+        if not self.entry_data[CONF_ALARM_AWAY_MODE] == DEFAULT_ALARM_AWAY_MODE:
             flags |= SUPPORT_ALARM_ARM_AWAY
-        if not self.entry_data[CONF_ALARM_HOME_MODE] == "":
+        if not self.entry_data[CONF_ALARM_HOME_MODE] == DEFAULT_ALARM_HOME_MODE:
             flags |= SUPPORT_ALARM_ARM_HOME
-        if not self.entry_data[CONF_ALARM_NIGHT_MODE] == "":
+        if not self.entry_data[CONF_ALARM_NIGHT_MODE] == DEFAULT_ALARM_NIGHT_MODE:
             flags |= SUPPORT_ALARM_ARM_NIGHT
-        if not self.entry_data[CONF_ALARM_CUSTOM_BYPASS_MODE] == "":
+        if (
+            not self.entry_data[CONF_ALARM_CUSTOM_BYPASS_MODE]
+            == DEFAULT_ALARM_CUSTOM_BYPASS_MODE
+        ):
             flags |= SUPPORT_ALARM_ARM_CUSTOM_BYPASS
-        if not self.entry_data[CONF_ALARM_VACATION_MODE] == "":
+        if not self.entry_data[CONF_ALARM_VACATION_MODE] == DEFAULT_ALARM_VACATION_MODE:
             flags |= SUPPORT_ALARM_ARM_VACATION
         return flags
 

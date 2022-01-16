@@ -26,6 +26,7 @@ from homeassistant.helpers.event import async_call_later
 
 from .const import (
     CONF_ACCOUNT,
+    CONF_ALARM_ARM_STATES,
     CONF_ALARM_AWAY_MODE,
     CONF_ALARM_CUSTOM_BYPASS_MODE,
     CONF_ALARM_HOME_MODE,
@@ -104,6 +105,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry_data[CONF_ALARM_VACATION_MODE] = entry.options.get(
         CONF_ALARM_VACATION_MODE, DEFAULT_ALARM_VACATION_MODE
     )
+
+    entry_data[CONF_ALARM_ARM_STATES] = {
+        DEFAULT_ALARM_AWAY_MODE,
+        DEFAULT_ALARM_HOME_MODE,
+        DEFAULT_ALARM_NIGHT_MODE,
+        DEFAULT_ALARM_CUSTOM_BYPASS_MODE,
+        DEFAULT_ALARM_VACATION_MODE,
+    }
 
     entry_data[CONF_CONFIG_LISTENER] = entry.add_update_listener(update_listener)
 

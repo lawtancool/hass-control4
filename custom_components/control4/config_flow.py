@@ -15,6 +15,7 @@ from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.device_registry import format_mac
 
 from .const import (
+    CONF_ALARM_ARM_STATES,
     CONF_ALARM_AWAY_MODE,
     CONF_ALARM_CUSTOM_BYPASS_MODE,
     CONF_ALARM_HOME_MODE,
@@ -186,10 +187,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_init(self, user_input=None):
         """Handle options flow."""
         if user_input is not None:
+            _LOGGER.debug(user_input)
             return self.async_create_entry(title="", data=user_input)
 
         # TODO: figure out how to accept empty strings to disable modes
         # TODO: figure out how to only show alarm options if a alarm_control_panel entity exists
+        self.entry_data = self.hass.data[DOMAIN][self.config_entry.entry_id]
+        _LOGGER.debug(self.entry_data[CONF_ALARM_ARM_STATES])
         data_schema = vol.Schema(
             {
                 vol.Optional(
@@ -197,32 +201,33 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     default=self.config_entry.options.get(
                         CONF_ALARM_AWAY_MODE, DEFAULT_ALARM_AWAY_MODE
                     ),
-                ): str,
+                ): vol.In(self.entry_data[CONF_ALARM_ARM_STATES]),
                 vol.Optional(
                     CONF_ALARM_HOME_MODE,
                     default=self.config_entry.options.get(
                         CONF_ALARM_HOME_MODE, DEFAULT_ALARM_HOME_MODE
                     ),
-                ): str,
+                ): vol.In(self.entry_data[CONF_ALARM_ARM_STATES]),
                 vol.Optional(
                     CONF_ALARM_NIGHT_MODE,
                     default=self.config_entry.options.get(
                         CONF_ALARM_NIGHT_MODE, DEFAULT_ALARM_NIGHT_MODE
                     ),
-                ): str,
+                ): vol.In(self.entry_data[CONF_ALARM_ARM_STATES]),
                 vol.Optional(
                     CONF_ALARM_CUSTOM_BYPASS_MODE,
                     default=self.config_entry.options.get(
                         CONF_ALARM_CUSTOM_BYPASS_MODE, DEFAULT_ALARM_CUSTOM_BYPASS_MODE
                     ),
-                ): str,
+                ): vol.In(self.entry_data[CONF_ALARM_ARM_STATES]),
                 vol.Optional(
                     CONF_ALARM_VACATION_MODE,
                     default=self.config_entry.options.get(
                         CONF_ALARM_VACATION_MODE, DEFAULT_ALARM_VACATION_MODE
                     ),
-                ): str,
-            }, required=False
+                ): vol.In(self.entry_data[CONF_ALARM_ARM_STATES]),
+            },
+            required=False,
         )
         return self.async_show_form(step_id="init", data_schema=data_schema)
 

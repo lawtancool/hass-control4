@@ -12,7 +12,7 @@ Add this repository as a custom repository in HACS to install the integration. O
 
 If you are using an alarm control panel, you must go to Home Assistant -> Configuration -> Devices and Services -> Integrations and click "Configure" on the Control4 entry.
 
-In the dialog that appears, type the English names of the arming modes that your alarm system is capable of into the corresponding fields. For example, a DSC alarm system uses "Stay" as the "Alarm arm home mode name", and "Away" as the "Alarm arm away mode name". If your alarm system does not use one of the mode names, just leave the field blank. Once you click submit on the dialog, Home Assistant will be able to arm your alarm control panel and detect its state.
+In the dialog that appears, choose the Control4 alarm arming modes that you want to correspond to each Home Assistant arming mode. For example, a DSC alarm system uses "Stay" as the "Alarm arm home mode name", and "Away" as the "Alarm arm away mode name". If your alarm system does not use one of the mode names, select `(not set)`. Once you click submit on the dialog, Home Assistant will be able to arm your alarm control panel and detect its state.
 
 ## Disclaimer
 
