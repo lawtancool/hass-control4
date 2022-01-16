@@ -30,6 +30,7 @@ from .const import (
     CONF_ALARM_CUSTOM_BYPASS_MODE,
     CONF_ALARM_HOME_MODE,
     CONF_ALARM_NIGHT_MODE,
+    CONF_ALARM_VACATION_MODE,
     CONF_CANCEL_TOKEN_REFRESH_CALLBACK,
     CONF_CONFIG_LISTENER,
     CONF_CONTROLLER_UNIQUE_ID,
@@ -42,6 +43,7 @@ from .const import (
     DEFAULT_ALARM_CUSTOM_BYPASS_MODE,
     DEFAULT_ALARM_HOME_MODE,
     DEFAULT_ALARM_NIGHT_MODE,
+    DEFAULT_ALARM_VACATION_MODE,
     DOMAIN,
 )
 from .director_utils import director_get_entry_variables
@@ -98,6 +100,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     entry_data[CONF_ALARM_CUSTOM_BYPASS_MODE] = entry.options.get(
         CONF_ALARM_CUSTOM_BYPASS_MODE, DEFAULT_ALARM_CUSTOM_BYPASS_MODE
+    )
+    entry_data[CONF_ALARM_VACATION_MODE] = entry.options.get(
+        CONF_ALARM_VACATION_MODE, DEFAULT_ALARM_VACATION_MODE
     )
 
     entry_data[CONF_CONFIG_LISTENER] = entry.add_update_listener(update_listener)
