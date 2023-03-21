@@ -65,10 +65,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry_data[CONF_CONTROLLER_UNIQUE_ID] = config[CONF_CONTROLLER_UNIQUE_ID]
 
     # Add Control4 controller to device registry
-    controller_href = (await entry_data[CONF_ACCOUNT].getAccountControllers())["href"]
-    entry_data[CONF_DIRECTOR_SW_VERSION] = await entry_data[
-        CONF_ACCOUNT
-    ].getControllerOSVersion(controller_href)
+    try:
+        controller_href = (await entry_data[CONF_ACCOUNT].getAccountControllers())["href"]
+    except client_exceptions.ClientError as exception:
+        raise ConfigEntryNotReady(exception) from exception
+
+    try:
+        entry_data[CONF_DIRECTOR_SW_VERSION] = await entry_data[
+            CONF_ACCOUNT
+        ].getControllerOSVersion(controller_href)
+    except client_exceptions.ClientError as exception:
+        raise ConfigEntryNotReady(exception) from exception
 
     _, model, mac_address = entry_data[CONF_CONTROLLER_UNIQUE_ID].split("_", 3)
     entry_data[CONF_DIRECTOR_MODEL] = model.upper()
@@ -85,7 +92,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     # Store all items found on controller for platforms to use
-    director_all_items = await entry_data[CONF_DIRECTOR].getAllItemInfo()
+    try:
+        director_all_items = await entry_data[CONF_DIRECTOR].getAllItemInfo()
+    except client_exceptions.ClientError as exception:
+        raise ConfigEntryNotReady(exception) from exception
     director_all_items = json.loads(director_all_items)
     entry_data[CONF_DIRECTOR_ALL_ITEMS] = director_all_items
 
@@ -168,7 +178,10 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
         raise ConfigEntryAuthFailed(exception) from exception
 
     controller_unique_id = config[CONF_CONTROLLER_UNIQUE_ID]
-    director_token_dict = await account.getDirectorBearerToken(controller_unique_id)
+    try:
+        director_token_dict = await account.getDirectorBearerToken(controller_unique_id)
+    except client_exceptions.ClientError as exception:
+        raise ConfigEntryNotReady(exception) from exception
     no_verify_ssl_session = aiohttp_client.async_get_clientsession(
         hass, verify_ssl=False
     )
