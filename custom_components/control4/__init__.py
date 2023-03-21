@@ -70,9 +70,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except client_exceptions.ClientError as exception:
         raise ConfigEntryNotReady(exception) from exception
 
-    entry_data[CONF_DIRECTOR_SW_VERSION] = await entry_data[
-        CONF_ACCOUNT
-    ].getControllerOSVersion(controller_href)
+    try:
+        entry_data[CONF_DIRECTOR_SW_VERSION] = await entry_data[
+            CONF_ACCOUNT
+        ].getControllerOSVersion(controller_href)
+    except client_exceptions.ClientError as exception:
+        raise ConfigEntryNotReady(exception) from exception
 
     _, model, mac_address = entry_data[CONF_CONTROLLER_UNIQUE_ID].split("_", 3)
     entry_data[CONF_DIRECTOR_MODEL] = model.upper()
