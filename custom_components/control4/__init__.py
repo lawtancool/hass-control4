@@ -68,14 +68,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Add Control4 controller to device registry
     try:
         controller_href = (await entry_data[CONF_ACCOUNT].getAccountControllers())["href"]
-    except client_exceptions.ClientError, asyncio.TimeoutError as exception:
+    except (client_exceptions.ClientError, asyncio.TimeoutError) as exception:
         raise ConfigEntryNotReady(exception) from exception
 
     try:
         entry_data[CONF_DIRECTOR_SW_VERSION] = await entry_data[
             CONF_ACCOUNT
         ].getControllerOSVersion(controller_href)
-    except client_exceptions.ClientError, asyncio.TimeoutError as exception:
+    except (client_exceptions.ClientError, asyncio.TimeoutError) as exception:
         raise ConfigEntryNotReady(exception) from exception
 
     _, model, mac_address = entry_data[CONF_CONTROLLER_UNIQUE_ID].split("_", 3)
@@ -95,7 +95,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Store all items found on controller for platforms to use
     try:
         director_all_items = await entry_data[CONF_DIRECTOR].getAllItemInfo()
-    except client_exceptions.ClientError, asyncio.TimeoutError as exception:
+    except (client_exceptions.ClientError, asyncio.TimeoutError) as exception:
         raise ConfigEntryNotReady(exception) from exception
     director_all_items = json.loads(director_all_items)
     entry_data[CONF_DIRECTOR_ALL_ITEMS] = director_all_items
@@ -173,7 +173,7 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
     )
     try:
         await account.getAccountBearerToken()
-    except client_exceptions.ClientError, asyncio.TimeoutError as exception:
+    except (client_exceptions.ClientError, asyncio.TimeoutError) as exception:
         raise ConfigEntryNotReady(exception) from exception
     except BadCredentials as exception:
         raise ConfigEntryAuthFailed(exception) from exception
@@ -181,7 +181,7 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
     controller_unique_id = config[CONF_CONTROLLER_UNIQUE_ID]
     try:
         director_token_dict = await account.getDirectorBearerToken(controller_unique_id)
-    except client_exceptions.ClientError, asyncio.TimeoutError as exception:
+    except (client_exceptions.ClientError, asyncio.TimeoutError) as exception:
         raise ConfigEntryNotReady(exception) from exception
     no_verify_ssl_session = aiohttp_client.async_get_clientsession(
         hass, verify_ssl=False
