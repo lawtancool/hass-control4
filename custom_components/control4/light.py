@@ -96,6 +96,8 @@ class Control4Light(Control4Entity, LightEntity):
         """Return whether this light is on or off."""
         if "LIGHT_LEVEL" in self.extra_state_attributes:
             return self.extra_state_attributes["LIGHT_LEVEL"] > 0
+        if "Brightness Percent" in self.extra_state_attributes:
+            return self.extra_state_attributes["Brightness Percent"] > 0
         if "LIGHT_STATE" in self.extra_state_attributes:
             return self.extra_state_attributes["LIGHT_STATE"] > 0
         if "CURRENT_POWER" in self.extra_state_attributes:
@@ -104,7 +106,10 @@ class Control4Light(Control4Entity, LightEntity):
     @property
     def brightness(self):
         """Return the brightness of this light between 0..255."""
-        return self.extra_state_attributes["LIGHT_LEVEL"] * 2.55
+        if "LIGHT_LEVEL" in self.extra_state_attributes:
+            return self.extra_state_attributes["LIGHT_LEVEL"] * 2.55
+        if "Brightness Percent" in self.extra_state_attributes:
+            return self.extra_state_attributes["Brightness Percent"] * 2.55
 
     @property
     def supported_features(self) -> int:
@@ -115,7 +120,7 @@ class Control4Light(Control4Entity, LightEntity):
 
     @property
     def _is_dimmer(self):
-        return bool("LIGHT_LEVEL" in self.extra_state_attributes)
+        return bool("LIGHT_LEVEL" in self.extra_state_attributes) or bool("Brightness Percent" in self.extra_state_attributes)
 
     async def async_turn_on(self, **kwargs) -> None:
         """Turn the entity on."""
