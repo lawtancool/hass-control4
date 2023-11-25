@@ -216,7 +216,10 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
         logging.getLogger("charset_normalizer").setLevel(logging.ERROR)
 
     _LOGGER.debug("Starting new WebSocket connection")
-    await entry_data[CONF_WEBSOCKET].sio_connect(director.director_bearer_token)
+    try:
+        await entry_data[CONF_WEBSOCKET].sio_connect(director.director_bearer_token)
+    except Exception as exception:
+        raise ConfigEntryNotReady(exception) from exception
 
     _LOGGER.debug(
         "Registering next token refresh in %s seconds",
