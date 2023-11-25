@@ -8,7 +8,7 @@ import logging
 from aiohttp import client_exceptions
 from pyControl4.account import C4Account
 from pyControl4.director import C4Director
-from pyControl4.error_handling import BadCredentials
+from pyControl4.error_handling import BadCredentials, InvalidCategory
 from pyControl4.websocket import C4Websocket
 
 from homeassistant.config_entries import ConfigEntry
@@ -164,8 +164,14 @@ async def get_items_of_category(hass: HomeAssistant, entry: ConfigEntry, categor
     """Return a list of all Control4 items with the specified category."""
     _LOGGER.debug("Getting items of category: %s", category)
     director = hass.data[DOMAIN][entry.entry_id][CONF_DIRECTOR]
-    return_list = await director.getAllItemsByCategory(category)
-    return json.loads(return_list)
+    try:
+        return_list = await director.getAllItemsByCategory(category)
+        return json.loads(return_list)
+    except InvalidCategory as e:
+        _LOGGER.warning("Category %s does not exist on this Control4 system, \
+                        entities from this domain will not be setup: ", e)
+        return []
+    
 
 
 async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
