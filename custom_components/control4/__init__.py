@@ -169,7 +169,7 @@ async def get_items_of_category(hass: HomeAssistant, entry: ConfigEntry, categor
         return json.loads(return_list)
     except InvalidCategory as e:
         _LOGGER.warning("Category %s does not exist on this Control4 system, \
-                        entities from this domain will not be setup: ", category, e)
+                        entities from this domain will not be setup.", category, exc_info=True)
         return []
     
 
