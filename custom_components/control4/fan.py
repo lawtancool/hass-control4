@@ -34,7 +34,13 @@ from .director_utils import update_variables_for_config_entry
 _LOGGER = logging.getLogger(__name__)
 
 CONTROL4_PROXY = "fan"
-CONTROL4_FAN_VARS = ["IS_ON", "FAN_SPEED", "PRESET_SPEED", "PRESET_MODE", "CURRENT_SPEED"]
+CONTROL4_FAN_VARS = [
+    "IS_ON",
+    "FAN_SPEED",
+    "PRESET_SPEED",
+    "PRESET_MODE",
+    "CURRENT_SPEED",
+]
 
 
 async def async_setup_entry(
@@ -73,7 +79,7 @@ async def async_setup_entry(
     entity_list = []
     for item in items_of_proxy:
         try:
-            if item["type"] == CONTROL4_ENTITY_TYPE and item['proxy'] == 'fan':
+            if item["type"] == CONTROL4_ENTITY_TYPE and item["proxy"] == "fan":
                 item_name = item["name"]
                 item_id = item["id"]
                 item_parent_id = item["parentId"]
@@ -95,7 +101,6 @@ async def async_setup_entry(
                 item,
             )
             continue
-                
 
         if item_id in fan_coordinator.data:
             item_is_fan = True
@@ -115,7 +120,15 @@ async def async_setup_entry(
 
         entity_list.append(
             Control4Fan(
-                entry_data, item_coordinator, item_name, item_id, item_device_name, item_manufacturer, item_model, item_parent_id,)
+                entry_data,
+                item_coordinator,
+                item_name,
+                item_id,
+                item_device_name,
+                item_manufacturer,
+                item_model,
+                item_parent_id,
+            )
         )
 
     async_add_entities(entity_list, True)
@@ -146,8 +159,8 @@ class Control4Fan(Control4Entity, FanEntity):
             device_model,
             device_id,
         )
-            #self._attr_color_mode = ColorMode.ONOFF
-            #self._attr_supported_color_modes = {ColorMode.ONOFF}
+        # self._attr_color_mode = ColorMode.ONOFF
+        # self._attr_supported_color_modes = {ColorMode.ONOFF}
 
     def _create_api_object(self):
         """Create a pyControl4 device object.
@@ -164,17 +177,19 @@ class Control4Fan(Control4Entity, FanEntity):
     @property
     def percentage(self) -> int | None:
         """Return the current speed as a percentage."""
-        return ranged_value_to_percentage((1,4),self.coordinator.data[self._idx]["CURRENT_SPEED"])
+        return ranged_value_to_percentage(
+            (1, 4), self.coordinator.data[self._idx]["CURRENT_SPEED"]
+        )
 
     @property
     def is_on(self):
         """Return whether this fan is on or off."""
         return self.coordinator.data[self._idx]["IS_ON"] > 0
-    
+
     @property
     def preset_modes(self):
         """Return a list of available modes for the fan."""
-        return list(range(0,5))
+        return list(range(0, 5))
 
     @property
     def preset_mode(self):
@@ -200,7 +215,7 @@ class Control4Fan(Control4Entity, FanEntity):
 
     async def async_set_percentage(self, percentage: int) -> None:
         c4_fan = self._create_api_object()
-        speed = percentage_to_ranged_value((1,4),percentage)
+        speed = percentage_to_ranged_value((1, 4), percentage)
         await c4_fan.setSpeed(speed)
 
     async def async_turn_off(self, **kwargs: Any) -> None:

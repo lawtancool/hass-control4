@@ -24,12 +24,12 @@ from homeassistant.components.climate import (
     HVACMode,
 )
 from homeassistant.const import (
-    ATTR_TEMPERATURE, 
+    ATTR_TEMPERATURE,
     UnitOfTemperature,
     PRECISION_HALVES,
     PRECISION_WHOLE,
-    CONF_SCAN_INTERVAL
-    )
+    CONF_SCAN_INTERVAL,
+)
 
 
 from homeassistant.config_entries import ConfigEntry
@@ -47,10 +47,20 @@ from .director_utils import update_variables_for_config_entry
 _LOGGER = logging.getLogger(__name__)
 
 CONTROL4_PROXY = "thermostatV2"
-CONTROL4_CLIMATE_VARS = ["HUMIDITY","TEMPERATURE_F","TEMPERATURE_C",
-                         "HVAC_MODE","FAN_MODE","FAN_STATE",
-                         "FAN_MODES_LIST","HVAC_MODES_LIST","SCALE",
-                         "HVAC_STATE","HEAT_SETPOINT_F","COOL_SETPOINT_F"]
+CONTROL4_CLIMATE_VARS = [
+    "HUMIDITY",
+    "TEMPERATURE_F",
+    "TEMPERATURE_C",
+    "HVAC_MODE",
+    "FAN_MODE",
+    "FAN_STATE",
+    "FAN_MODES_LIST",
+    "HVAC_MODES_LIST",
+    "SCALE",
+    "HVAC_STATE",
+    "HEAT_SETPOINT_F",
+    "COOL_SETPOINT_F",
+]
 
 CONTROL4_HVAC_MODE_OFF = "Off"
 CONTROL4_HVAC_MODE_HEAT = "Heat"
@@ -62,7 +72,7 @@ CONTROL4_HVAC_MODE_AUX_HEAT = "Emergency Heat"
 CONTROL4_FAN_MODE_ON = "On"
 CONTROL4_FAN_MODE_AUTO = "Auto"
 CONTROL4_FAN_MODE_DIFFUSE = "Circulate"
-MIN_TEMP_RANGE = 2 
+MIN_TEMP_RANGE = 2
 
 CONTROL4_HVAC_MODES = {
     HVACMode.OFF: CONTROL4_HVAC_MODE_OFF,
@@ -90,7 +100,6 @@ FAN_MODES = {
     CONTROL4_FAN_MODE_AUTO: FAN_AUTO,
     CONTROL4_FAN_MODE_DIFFUSE: FAN_DIFFUSE,
 }
-
 
 
 async def async_setup_entry(
@@ -129,7 +138,7 @@ async def async_setup_entry(
     entity_list = []
     for item in items_of_proxy:
         try:
-            if item["type"] == CONTROL4_ENTITY_TYPE and item['proxy'] == 'thermostatV2':
+            if item["type"] == CONTROL4_ENTITY_TYPE and item["proxy"] == "thermostatV2":
                 item_name = item["name"]
                 item_id = item["id"]
                 item_parent_id = item["parentId"]
@@ -151,7 +160,6 @@ async def async_setup_entry(
                 item,
             )
             continue
-                
 
         if item_id in climate_coordinator.data:
             item_is_climate = True
@@ -171,7 +179,15 @@ async def async_setup_entry(
 
         entity_list.append(
             Control4Climate(
-                entry_data, item_coordinator, item_name, item_id, item_device_name, item_manufacturer, item_model, item_parent_id,)
+                entry_data,
+                item_coordinator,
+                item_name,
+                item_id,
+                item_device_name,
+                item_manufacturer,
+                item_model,
+                item_parent_id,
+            )
         )
 
     async_add_entities(entity_list, True)
@@ -211,17 +227,16 @@ class Control4Climate(Control4Entity, ClimateEntity):
         """
         return C4Climate(self.entry_data[CONF_DIRECTOR], self._idx)
 
-
     @property
     def current_humidity(self) -> int | None:
         """Return the current humidity."""
         return self.coordinator.data[self._idx]["HUMIDITY"]
-    
+
     @property
     def aux_mode_active(self) -> bool:
         """Return the current aux mode."""
         return self._aux_mode_active
-    
+
     @property
     def current_temperature(self) -> float:
         """Return the current temperature."""
@@ -231,14 +246,14 @@ class Control4Climate(Control4Entity, ClimateEntity):
     def fan_mode(self) -> str | None:
         """Returns the current fan mode."""
         if self.coordinator.data[self._idx]["FAN_MODE"] in FAN_MODES:
-           return FAN_MODES[self.coordinator.data[self._idx]["FAN_MODE"]]
+            return FAN_MODES[self.coordinator.data[self._idx]["FAN_MODE"]]
         return None
-    
+
     @property
     def fan_modes(self) -> list[str] | None:
         """Returns current fan modes supported."""
         return list(FAN_MODES.values())
-    
+
     @property
     def hvac_action(self) -> str | None:
         """Returns current HVAC action."""
@@ -251,23 +266,26 @@ class Control4Climate(Control4Entity, ClimateEntity):
 
     @property
     def hvac_mode(self) -> str | None:
-        if self.coordinator.data[self._idx]["HVAC_MODE"] == '' or self.coordinator.data[self._idx]["HVAC_MODE"] not in HVAC_MODES:
+        if (
+            self.coordinator.data[self._idx]["HVAC_MODE"] == ""
+            or self.coordinator.data[self._idx]["HVAC_MODE"] not in HVAC_MODES
+        ):
             return HVACMode.OFF
         return HVAC_MODES[self.coordinator.data[self._idx]["HVAC_MODE"]]
-    
+
     @property
     def hvac_modes(self) -> list(str) | None:
         """Returns current fan mode."""
-        active_modes = list() 
+        active_modes = list()
         c4modes = self.coordinator.data[self._idx]["HVAC_MODES_LIST"].split(",")
-        #_LOGGER.debug( "c4modes = %s", self.coordinator.data[self._idx]["HVAC_MODES_LIST"],)
+        # _LOGGER.debug( "c4modes = %s", self.coordinator.data[self._idx]["HVAC_MODES_LIST"],)
         for mode in c4modes:
-           #_LOGGER.debug( "a_c4mode = %s", mode,)
-           if mode in HVAC_MODES and HVAC_MODES[mode] not in active_modes:
-              active_modes.append(HVAC_MODES[mode])
+            # _LOGGER.debug( "a_c4mode = %s", mode,)
+            if mode in HVAC_MODES and HVAC_MODES[mode] not in active_modes:
+                active_modes.append(HVAC_MODES[mode])
         if len(active_modes) == 0:
             active_modes.append(HVACMode.OFF)
-        return active_modes 
+        return active_modes
 
     @property
     def is_aux_heat(self) -> bool | None:
@@ -298,7 +316,7 @@ class Control4Climate(Control4Entity, ClimateEntity):
         if self.hvac_mode != HVACMode.HEAT_COOL:
             return None
         return self.coordinator.data[self._idx]["HEAT_SETPOINT_F"]
-    
+
     @property
     def temperature_unit(self) -> str:
         """Return the unit of measurement used by the platform."""
@@ -310,7 +328,11 @@ class Control4Climate(Control4Entity, ClimateEntity):
     @property
     def supported_features(self) -> ClimateEntityFeature:
         """Flag supported features."""
-        features = ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.FAN_MODE | ClimateEntityFeature.TARGET_TEMPERATURE_RANGE
+        features = (
+            ClimateEntityFeature.TARGET_TEMPERATURE
+            | ClimateEntityFeature.FAN_MODE
+            | ClimateEntityFeature.TARGET_TEMPERATURE_RANGE
+        )
         if "Emergency" in self.coordinator.data[self._idx]["HVAC_MODES_LIST"]:
             features = features | ClimateEntityFeature.AUX_HEAT
         #    _LOGGER.debug( "Emergency Found: %s",
@@ -322,15 +344,19 @@ class Control4Climate(Control4Entity, ClimateEntity):
         """Set the hvac mode."""
         c4_climate = self._create_api_object()
 
-        #  
-        _LOGGER.debug( "set hvac mode: %s", hvac_mode,
-         )
+        #
+        _LOGGER.debug(
+            "set hvac mode: %s",
+            hvac_mode,
+        )
         if hvac_mode == HVACMode.HEAT:
             if self.aux_mode_active:
-                _LOGGER.debug( "set hvac mode with aux: %s", hvac_mode,
+                _LOGGER.debug(
+                    "set hvac mode with aux: %s",
+                    hvac_mode,
                 )
                 await c4_climate.setHvacMode(CONTROL4_HVAC_MODE_AUX_HEAT)
-            else:         
+            else:
                 await c4_climate.setHvacMode(CONTROL4_HVAC_MODE_HEAT)
         else:
             if hvac_mode in CONTROL4_HVAC_MODES:
@@ -352,10 +378,10 @@ class Control4Climate(Control4Entity, ClimateEntity):
                 hvac_mode,
             )
 
-#    async def async_set_humidity(self, humidity) -> None:
-#        """Set new target humidity."""
-#        c4_climate = self._create_api_object()
-#        await c4_climate.setHumidity(humidity)
+    #    async def async_set_humidity(self, humidity) -> None:
+    #        """Set new target humidity."""
+    #        c4_climate = self._create_api_object()
+    #        await c4_climate.setHumidity(humidity)
 
     async def async_set_temperature(self, **kwargs) -> None:
         """Set new target temperature."""
@@ -380,9 +406,10 @@ class Control4Climate(Control4Entity, ClimateEntity):
             elif self.hvac_mode == HVACMode.HEAT and temp:
                 await c4_climate.setHeatSetpoint(temp)
         except C4Exception as err:
-            raise UpdateFailed(f"Error setting {self.entity_id} temperature to {kwargs}: {err}") from err
+            raise UpdateFailed(
+                f"Error setting {self.entity_id} temperature to {kwargs}: {err}"
+            ) from err
 
-  
     async def async_turn_aux_heat_off(self) -> None:
         """Turn auxiliary heater off."""
         self._aux_mode_active = False

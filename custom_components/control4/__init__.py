@@ -74,7 +74,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Add Control4 controller to device registry
     try:
-        controller_href = (await entry_data[CONF_ACCOUNT].getAccountControllers())["href"]
+        controller_href = (await entry_data[CONF_ACCOUNT].getAccountControllers())[
+            "href"
+        ]
     except (client_exceptions.ClientError, asyncio.TimeoutError) as exception:
         raise ConfigEntryNotReady(exception) from exception
 
@@ -170,10 +172,13 @@ async def get_items_of_category(hass: HomeAssistant, entry: ConfigEntry, categor
         return_list = await director.getAllItemsByCategory(category)
         return json.loads(return_list)
     except InvalidCategory as e:
-        _LOGGER.warning("Category %s does not exist on this Control4 system, \
-                        entities from this domain will not be setup.", category, exc_info=True)
+        _LOGGER.warning(
+            "Category %s does not exist on this Control4 system, \
+                        entities from this domain will not be setup.",
+            category,
+            exc_info=True,
+        )
         return []
-    
 
 
 async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
