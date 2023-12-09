@@ -181,6 +181,15 @@ async def get_items_of_category(hass: HomeAssistant, entry: ConfigEntry, categor
         return []
 
 
+async def get_items_of_proxy(hass: HomeAssistant, entry: ConfigEntry, proxy: str):
+    """Return a list of all Control4 items with the specified proxy."""
+    director_all_items = hass.data[DOMAIN][entry.entry_id][CONF_DIRECTOR_ALL_ITEMS]
+    return_list = []
+    for item in director_all_items:
+        if "proxy" in item and proxy in item["proxy"]:
+            return_list.append(item)
+    return return_list
+
 async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
     """Store updated authentication and director tokens in hass.data, and schedule next token refresh."""
     config = entry.data
