@@ -190,6 +190,7 @@ async def get_items_of_proxy(hass: HomeAssistant, entry: ConfigEntry, proxy: str
             return_list.append(item)
     return return_list
 
+
 async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
     """Store updated authentication and director tokens in hass.data, and schedule next token refresh."""
     config = entry.data
