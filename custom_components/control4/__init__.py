@@ -57,6 +57,7 @@ PLATFORMS = [
     Platform.ALARM_CONTROL_PANEL,
     Platform.BINARY_SENSOR,
     Platform.FAN,
+    Platform.CLIMATE,
     Platform.LOCK,
 ]
 
