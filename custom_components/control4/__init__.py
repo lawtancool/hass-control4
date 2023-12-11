@@ -56,9 +56,8 @@ PLATFORMS = [
     Platform.LIGHT,
     Platform.ALARM_CONTROL_PANEL,
     Platform.BINARY_SENSOR,
-    Platform.LOCK,
     Platform.FAN,
-    Platform.CLIMATE,
+    Platform.LOCK,
 ]
 
 
@@ -74,9 +73,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Add Control4 controller to device registry
     try:
-        controller_href = (await entry_data[CONF_ACCOUNT].getAccountControllers())[
-            "href"
-        ]
+        controller_href = (await entry_data[CONF_ACCOUNT].getAccountControllers())["href"]
     except (client_exceptions.ClientError, asyncio.TimeoutError) as exception:
         raise ConfigEntryNotReady(exception) from exception
 
@@ -172,23 +169,10 @@ async def get_items_of_category(hass: HomeAssistant, entry: ConfigEntry, categor
         return_list = await director.getAllItemsByCategory(category)
         return json.loads(return_list)
     except InvalidCategory as e:
-        _LOGGER.warning(
-            "Category %s does not exist on this Control4 system, \
-                        entities from this domain will not be setup.",
-            category,
-            exc_info=True,
-        )
+        _LOGGER.warning("Category %s does not exist on this Control4 system, \
+                        entities from this domain will not be setup.", category, exc_info=True)
         return []
-
-
-async def get_items_of_proxy(hass: HomeAssistant, entry: ConfigEntry, proxy: str):
-    """Return a list of all Control4 items with the specified proxy."""
-    director_all_items = hass.data[DOMAIN][entry.entry_id][CONF_DIRECTOR_ALL_ITEMS]
-    return_list = []
-    for item in director_all_items:
-        if "proxy" in item and proxy in item["proxy"]:
-            return_list.append(item)
-    return return_list
+    
 
 
 async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):

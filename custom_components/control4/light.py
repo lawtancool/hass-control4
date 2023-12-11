@@ -37,7 +37,7 @@ async def async_setup_entry(
 
     for item in items_of_category:
         try:
-            if item["type"] == CONTROL4_ENTITY_TYPE and item["id"]:
+            if item["type"] == CONTROL4_ENTITY_TYPE and item["id"] and "fan" not in item['proxy']:
                 item_name = str(item["name"])
                 item_id = item["id"]
                 item_area = item["roomName"]
@@ -137,7 +137,7 @@ class Control4Light(Control4Entity, LightEntity):
             await c4_light.rampToLevel(brightness, transition_length)
         else:
             await c4_light.setLevel(100)
-        await self.async_update_ha_state()
+        await self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
         """Turn the entity off."""
@@ -150,4 +150,4 @@ class Control4Light(Control4Entity, LightEntity):
             await c4_light.rampToLevel(0, transition_length)
         else:
             await c4_light.setLevel(0)
-        await self.async_update_ha_state()
+        await self.async_write_ha_state()
