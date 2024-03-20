@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from typing import Any
 
 from aiohttp import client_exceptions
 from pyControl4.account import C4Account
@@ -18,12 +19,17 @@ from homeassistant.const import (
     CONF_TOKEN,
     CONF_USERNAME,
     Platform,
+    CONF_SCAN_INTERVAL,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client, device_registry as dr
 from homeassistant.helpers.entity import DeviceInfo, Entity
 from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.update_coordinator import (
+    CoordinatorEntity,
+    DataUpdateCoordinator,
+)
 
 from .const import (
     CONF_ACCOUNT,
@@ -41,11 +47,13 @@ from .const import (
     CONF_DIRECTOR_MODEL,
     CONF_DIRECTOR_SW_VERSION,
     CONF_WEBSOCKET,
+    CONF_UI_CONFIGURATION,
     DEFAULT_ALARM_AWAY_MODE,
     DEFAULT_ALARM_CUSTOM_BYPASS_MODE,
     DEFAULT_ALARM_HOME_MODE,
     DEFAULT_ALARM_NIGHT_MODE,
     DEFAULT_ALARM_VACATION_MODE,
+    DEFAULT_SCAN_INTERVAL,
     DOMAIN,
 )
 from .director_utils import director_get_entry_variables
@@ -57,6 +65,7 @@ PLATFORMS = [
     Platform.ALARM_CONTROL_PANEL,
     Platform.BINARY_SENSOR,
     Platform.LOCK,
+    Platform.MEDIA_PLAYER
 ]
 
 
@@ -104,6 +113,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryNotReady(exception) from exception
     director_all_items = json.loads(director_all_items)
     entry_data[CONF_DIRECTOR_ALL_ITEMS] = director_all_items
+    
+    entry_data[CONF_UI_CONFIGURATION] = json.loads(await entry_data[CONF_DIRECTOR].getUiConfiguration())
+    
+    # Load options from config entry
+    entry_data[CONF_SCAN_INTERVAL] = entry.options.get(
+        CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+    )
 
     # Load options from config entry
     entry_data[CONF_ALARM_AWAY_MODE] = entry.options.get(
@@ -417,3 +433,40 @@ class Control4Entity(Entity):
     def extra_state_attributes(self) -> dict:
         """Return Extra state attributes."""
         return self._extra_state_attributes
+
+class Control4CoordinatorEntity(CoordinatorEntity[Any]):
+    """Base entity for Control4."""
+
+    def __init__(
+        self,
+        entry_data: dict,
+        coordinator: DataUpdateCoordinator[Any],
+        name: str | None,
+        idx: int,
+        device_name: str | None,
+        device_manufacturer: str | None,
+        device_model: str | None,
+        device_id: int,
+    ) -> None:
+        """Initialize a Control4 entity."""
+        super().__init__(coordinator)
+        self.entry_data = entry_data
+        self._attr_name = name
+        self._attr_unique_id = str(idx)
+        self._idx = idx
+        self._controller_unique_id = entry_data[CONF_CONTROLLER_UNIQUE_ID]
+        self._device_name = device_name
+        self._device_manufacturer = device_manufacturer
+        self._device_model = device_model
+        self._device_id = device_id
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return info of parent Control4 device of entity."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, str(self._device_id))},
+            manufacturer=self._device_manufacturer,
+            model=self._device_model,
+            name=self._device_name,
+            via_device=(DOMAIN, self._controller_unique_id),
+        )
