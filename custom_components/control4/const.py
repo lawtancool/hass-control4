@@ -13,6 +13,8 @@ DEFAULT_ALARM_CUSTOM_BYPASS_MODE = "(not set)"
 CONF_ALARM_VACATION_MODE = "alarm_vacation_mode"
 DEFAULT_ALARM_VACATION_MODE = "(not set)"
 
+API_RETRY_TIMES = 5
+
 CONF_ACCOUNT = "account"
 CONF_DIRECTOR = "director"
 CONF_WEBSOCKET = "websocket"

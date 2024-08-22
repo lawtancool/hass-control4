@@ -26,6 +26,7 @@ from homeassistant.helpers.entity import DeviceInfo, Entity
 from homeassistant.helpers.event import async_call_later
 
 from .const import (
+    API_RETRY_TIMES,
     CONF_ACCOUNT,
     CONF_ALARM_ARM_STATES,
     CONF_ALARM_AWAY_MODE,
@@ -59,6 +60,18 @@ PLATFORMS = [
     Platform.LOCK,
 ]
 
+async def call_c4_api_retry(func, *func_args):
+     """Call C4 API function and retry on failure."""
+     for i in range(API_RETRY_TIMES):
+         try:
+             output = await func(*func_args)
+             return output
+         except BadCredentials as exception:
+             raise ConfigEntryAuthFailed(exception) from exception
+         except client_exceptions.ClientError as exception:
+             _LOGGER.error("Error connecting to Control4 account API: %s", exception)
+             if i == API_RETRY_TIMES - 1:
+                 raise ConfigEntryNotReady(exception) from exception
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Control4 from a config entry."""
@@ -71,17 +84,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry_data[CONF_CONTROLLER_UNIQUE_ID] = config[CONF_CONTROLLER_UNIQUE_ID]
 
     # Add Control4 controller to device registry
-    try:
-        controller_href = (await entry_data[CONF_ACCOUNT].getAccountControllers())["href"]
-    except (client_exceptions.ClientError, asyncio.TimeoutError) as exception:
-        raise ConfigEntryNotReady(exception) from exception
-
-    try:
-        entry_data[CONF_DIRECTOR_SW_VERSION] = await entry_data[
-            CONF_ACCOUNT
-        ].getControllerOSVersion(controller_href)
-    except (client_exceptions.ClientError, asyncio.TimeoutError) as exception:
-        raise ConfigEntryNotReady(exception) from exception
+    controller_href = (await call_c4_api_retry(entry_data[CONF_ACCOUNT].getAccountControllers))["href"]
+    entry_data[CONF_DIRECTOR_SW_VERSION] = await call_c4_api_retry(
+        entry_data[CONF_ACCOUNT].getControllerOSVersion, controller_href
+    )
 
     _, model, mac_address = entry_data[CONF_CONTROLLER_UNIQUE_ID].split("_", 3)
     entry_data[CONF_DIRECTOR_MODEL] = model.upper()
@@ -190,10 +196,9 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
         raise ConfigEntryAuthFailed(exception) from exception
 
     controller_unique_id = config[CONF_CONTROLLER_UNIQUE_ID]
-    try:
-        director_token_dict = await account.getDirectorBearerToken(controller_unique_id)
-    except (client_exceptions.ClientError, asyncio.TimeoutError) as exception:
-        raise ConfigEntryNotReady(exception) from exception
+    director_token_dict = await call_c4_api_retry(
+        account.getDirectorBearerToken, controller_unique_id
+    )
     no_verify_ssl_session = aiohttp_client.async_get_clientsession(
         hass, verify_ssl=False
     )
