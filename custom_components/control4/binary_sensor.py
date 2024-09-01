@@ -5,11 +5,8 @@ import json
 import logging
 
 from homeassistant.components.binary_sensor import (
-    DEVICE_CLASS_DOOR,
-    DEVICE_CLASS_MOTION,
-    DEVICE_CLASS_OPENING,
-    DEVICE_CLASS_WINDOW,
-    BinarySensorEntity,
+    BinarySensorDeviceClass,
+    BinarySensorEntity
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -29,71 +26,10 @@ CONTROL4_WINDOW_PROXY = "contactsingle_windowcontactsensor_c4"
 CONTROL4_MOTION_PROXY = "contactsingle_motionsensor_c4"
 
 CONTROL4_PROXY_MAPPING = {
-    CONTROL4_DOOR_PROXY: DEVICE_CLASS_DOOR,
-    CONTROL4_WINDOW_PROXY: DEVICE_CLASS_WINDOW,
-    CONTROL4_MOTION_PROXY: DEVICE_CLASS_MOTION,
+    CONTROL4_DOOR_PROXY: BinarySensorDeviceClass.DOOR,
+    CONTROL4_WINDOW_PROXY: BinarySensorDeviceClass.WINDOW,
+    CONTROL4_MOTION_PROXY: BinarySensorDeviceClass.MOTION,
 }
-
-
-# async def async_setup_entry(
-#     hass: HomeAssistant, entry: ConfigEntry, async_add_entities
-# ):
-#     """Set up Control4 alarm control panels from a config entry."""
-#     entry_data = hass.data[DOMAIN][entry.entry_id]
-
-#     items_of_category = await get_items_of_category(hass, entry, CONTROL4_CATEGORY)
-#     director = entry_data[CONF_DIRECTOR]
-#     for item in items_of_category:
-#         if (
-#             item["type"] == CONTROL4_ENTITY_TYPE
-#             and item["control"] == CONTROL4_CONTROL_TYPE
-#         ):
-#             item_name = item["name"]
-#             item_id = item["id"]
-#             item_parent_id = item["parentId"]
-#             item_coordinator = coordinator
-
-#             item_manufacturer = None
-#             item_device_name = None
-#             item_model = None
-
-#             item_device_class = DEVICE_CLASS_OPENING
-#             for proxy_type in [
-#                 CONTROL4_DOOR_PROXY,
-#                 CONTROL4_WINDOW_PROXY,
-#                 CONTROL4_MOTION_PROXY,
-#             ]:
-#                 if item["proxy"] == proxy_type:
-#                     item_device_class = CONTROL4_PROXY_MAPPING[proxy_type]
-#                     break
-
-#             item_setup_info = await director.getItemSetup(item_id)
-#             item_setup_info = json.loads(item_setup_info)
-#             item_alarm_zone_id = None
-#             if "panel_setup" in item_setup_info:
-#                 for key in item_setup_info["panel_setup"]["all_zones"]["zone_info"]:
-#                     if key["name"] == item_name:
-#                         item_alarm_zone_id = key["id"]
-#                         break
-
-#             async_add_entities(
-#                 [
-#                     Control4BinarySensor(
-#                         entry_data,
-#                         entry,
-#                         item_coordinator,
-#                         item_name,
-#                         item_id,
-#                         item_device_name,
-#                         item_manufacturer,
-#                         item_model,
-#                         item_parent_id,
-#                         item_device_class,
-#                         item_alarm_zone_id,
-#                     )
-#                 ],
-#                 True,
-#             )
 
 
 async def async_setup_entry(
@@ -121,7 +57,7 @@ async def async_setup_entry(
                 item_device_name = None
                 item_model = None
 
-                item_device_class = DEVICE_CLASS_OPENING
+                item_device_class = BinarySensorDeviceClass.OPENING
                 for proxy_type in [
                     CONTROL4_DOOR_PROXY,
                     CONTROL4_WINDOW_PROXY,
@@ -155,10 +91,6 @@ async def async_setup_entry(
             continue
 
         item_attributes = await director_get_entry_variables(hass, entry, item_id)
-        # item_parent_attributes = await director_get_entry_variables(
-        #     hass, entry, item_parent_id
-        # )
-        # item_attributes.update(item_parent_attributes)
 
         entity_list.append(
             Control4BinarySensor(
@@ -241,7 +173,7 @@ class Control4BinarySensor(Control4Entity, BinarySensorEntity):
                 self._extra_state_attributes["LastActionTime"] = message["time"]
                 await self._data_to_extra_state_attributes(data["contact_state"])
         _LOGGER.debug("Message for device %s", device)
-        self.schedule_update_ha_state()
+        self.async_write_ha_state()
 
     @property
     def is_on(self):
@@ -263,10 +195,3 @@ class Control4BinarySensor(Control4Entity, BinarySensorEntity):
         # Rather, they are attached to a room id.
         # Therefore, there is no device info for Home Assistant to use.
         return None
-
-    # @property
-    # def extra_state_attributes(self):
-    #     """Return Extra state attributes."""
-    #     if self._alarm_zone_id is not None:
-    #         return {"alarm_zone_id": self._alarm_zone_id}
-    #     return None

@@ -165,7 +165,6 @@ class Control4Light(Control4Entity, LightEntity):
             await c4_light.rampToLevel(brightness, transition_length)
         else:
             await c4_light.setLevel(100)
-        await self.async_update_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
         """Turn the entity off."""
@@ -178,4 +177,3 @@ class Control4Light(Control4Entity, LightEntity):
             await c4_light.rampToLevel(0, transition_length)
         else:
             await c4_light.setLevel(0)
-        await self.async_update_ha_state()

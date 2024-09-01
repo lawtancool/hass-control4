@@ -422,7 +422,7 @@ class Control4Entity(Entity):
             data = message["data"]
             await self._data_to_extra_state_attributes(data)
         _LOGGER.debug("Message for device %s", device)
-        self.schedule_update_ha_state()
+        self.async_write_ha_state()
 
     async def _data_to_extra_state_attributes(self, data) -> None:
         """Load data from Websocket update into extra_state_attributes."""
