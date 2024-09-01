@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 from typing import Any
+import random
 
 from aiohttp import client_exceptions
 from pyControl4.account import C4Account
@@ -55,6 +56,8 @@ from .const import (
     DEFAULT_ALARM_VACATION_MODE,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    RETRY_BACKOFF_MAX_SEC,
+    SCHEDULE_REFRESH_ADVANCE_SEC,
 )
 from .director_utils import director_get_entry_variables
 
@@ -81,7 +84,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Add Control4 controller to device registry
     try:
-        controller_href = (await entry_data[CONF_ACCOUNT].getAccountControllers())["href"]
+        controller_href = (await entry_data[CONF_ACCOUNT].getAccountControllers())[
+            "href"
+        ]
     except (client_exceptions.ClientError, asyncio.TimeoutError) as exception:
         raise ConfigEntryNotReady(exception) from exception
 
@@ -184,10 +189,13 @@ async def get_items_of_category(hass: HomeAssistant, entry: ConfigEntry, categor
         return_list = await director.getAllItemsByCategory(category)
         return json.loads(return_list)
     except InvalidCategory as e:
-        _LOGGER.warning("Category %s does not exist on this Control4 system, \
-                        entities from this domain will not be setup.", category, exc_info=True)
+        _LOGGER.warning(
+            "Category %s does not exist on this Control4 system, \
+                        entities from this domain will not be setup.",
+            category,
+            exc_info=True,
+        )
         return []
-    
 
 
 async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
@@ -248,14 +256,20 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
     except Exception as exception:
         raise ConfigEntryNotReady(exception) from exception
 
+    # Schedule refresh 5mins before expiry, but no sooner than 5mins from now
+    delay = max(
+        director_token_dict["validSeconds"] - SCHEDULE_REFRESH_ADVANCE_SEC,
+        SCHEDULE_REFRESH_ADVANCE_SEC,
+    )
+
     _LOGGER.debug(
         "Registering next token refresh in %s seconds",
-        director_token_dict["validSeconds"],
+        delay,
     )
     obj = RefreshTokensObject(hass, entry)
     entry_data[CONF_CANCEL_TOKEN_REFRESH_CALLBACK] = async_call_later(
         hass=hass,
-        delay=director_token_dict["validSeconds"],
+        delay=delay,
         action=obj.refresh_tokens,
     )
 
@@ -316,11 +330,30 @@ class RefreshTokensObject:
         """Initialize a RefreshTokensObject by storing the HomeAssistant and ConfigEntry objects required to run refresh_tokens()."""
         self.hass = hass
         self.entry = entry
+        self.retries = 0
 
     async def refresh_tokens(self, datetime):
         """Call the refresh_tokens function to store updated authentication and director tokens in hass.data."""
         # unused datetime parameter is required, since Home Assistant will pass a datetime.datetime object as parameter when calling this function via async_call_later()
-        return await refresh_tokens(self.hass, self.entry)
+        return await self._refresh_token_with_retry()
+
+    async def _refresh_token_with_retry(self):
+        try:
+            await refresh_tokens(self.hass, self.entry)
+        except ConfigEntryNotReady:
+            self._schedule_refresh_retry()
+
+    def _schedule_refresh_retry(self):
+        self.retries += 1
+        # exponential backoff with jitter
+        delay = random.uniform(0, min(2**self.retries, RETRY_BACKOFF_MAX_SEC))
+        _LOGGER.warning("Token refresh failed, trying again in %s seconds", delay)
+        entry_data = self.hass.data[DOMAIN][self.entry.entry_id]
+        entry_data[CONF_CANCEL_TOKEN_REFRESH_CALLBACK] = async_call_later(
+            hass=self.hass,
+            delay=delay,
+            action=self.refresh_tokens,
+        )
 
 
 class Control4Entity(Entity):
@@ -405,7 +438,7 @@ class Control4Entity(Entity):
             data = message["data"]
             await self._data_to_extra_state_attributes(data)
         _LOGGER.debug("Message for device %s", device)
-        self.schedule_update_ha_state()
+        self.async_write_ha_state()
 
     async def _data_to_extra_state_attributes(self, data) -> None:
         """Load data from Websocket update into extra_state_attributes."""
