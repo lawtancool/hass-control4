@@ -312,7 +312,7 @@ class RefreshTokensObject:
     async def refresh_tokens(self, datetime):
         """Call the refresh_tokens function to store updated authentication and director tokens in hass.data."""
         # unused datetime parameter is required, since Home Assistant will pass a datetime.datetime object as parameter when calling this function via async_call_later()
-        return self._refresh_token_with_retry
+        return await self._refresh_token_with_retry()
 
     async def _refresh_token_with_retry(self):
         try:
