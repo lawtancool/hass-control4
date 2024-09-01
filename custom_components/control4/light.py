@@ -16,8 +16,7 @@ from homeassistant.components.light import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.util.color import value_to_brightness
-from homeassistant.util.percentage import percentage_to_ranged_value
+from homeassistant.util.color import value_to_brightness, brightness_to_value
 
 from . import Control4Entity, get_items_of_category
 from .const import CONF_DIRECTOR, CONTROL4_ENTITY_TYPE, DOMAIN
@@ -126,7 +125,7 @@ class Control4Light(Control4Entity, LightEntity):
         """Flag supported features."""
         if self._is_dimmer:
             return LightEntityFeature.TRANSITION
-        return 0
+        return LightEntityFeature(0)
 
     @property
     def color_mode(self) -> ColorMode:
@@ -155,11 +154,9 @@ class Control4Light(Control4Entity, LightEntity):
             else:
                 transition_length = 0
             if ATTR_BRIGHTNESS in kwargs:
-                brightness = math.ceil(
-                    percentage_to_ranged_value(
+                brightness = round(brightness_to_value(
                         CONTROL4_BRIGHTNESS_SCALE, kwargs[ATTR_BRIGHTNESS]
-                    )
-                )
+                    ))
             else:
                 brightness = 100
             await c4_light.rampToLevel(brightness, transition_length)
