@@ -111,13 +111,12 @@ class Control4Light(Control4Entity, LightEntity):
         """Return the brightness of this light between 0..255."""
         if "LIGHT_LEVEL" in self.extra_state_attributes:
             return value_to_brightness(
-                CONTROL4_BRIGHTNESS_SCALE, 
-                self.extra_state_attributes["LIGHT_LEVEL"]
+                CONTROL4_BRIGHTNESS_SCALE, self.extra_state_attributes["LIGHT_LEVEL"]
             )
         if "Brightness Percent" in self.extra_state_attributes:
             return value_to_brightness(
                 CONTROL4_BRIGHTNESS_SCALE,
-                self.extra_state_attributes["Brightness Percent"]
+                self.extra_state_attributes["Brightness Percent"],
             )
 
     @property
@@ -154,9 +153,11 @@ class Control4Light(Control4Entity, LightEntity):
             else:
                 transition_length = 0
             if ATTR_BRIGHTNESS in kwargs:
-                brightness = round(brightness_to_value(
+                brightness = round(
+                    brightness_to_value(
                         CONTROL4_BRIGHTNESS_SCALE, kwargs[ATTR_BRIGHTNESS]
-                    ))
+                    )
+                )
             else:
                 brightness = 100
             await c4_light.rampToLevel(brightness, transition_length)
