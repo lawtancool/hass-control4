@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 
 from aiohttp import client_exceptions
 from pyControl4.account import C4Account
@@ -47,6 +48,8 @@ from .const import (
     DEFAULT_ALARM_NIGHT_MODE,
     DEFAULT_ALARM_VACATION_MODE,
     DOMAIN,
+    RETRY_BACKOFF_MAX_SEC,
+    SCHEDULE_REFRESH_ADVANCE_SEC,
 )
 from .director_utils import director_get_entry_variables
 
@@ -232,14 +235,18 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
     except Exception as exception:
         raise ConfigEntryNotReady(exception) from exception
 
+    # Schedule refresh 5mins before expiry, but no sooner than 5mins from now
+    delay = max(director_token_dict["validSeconds"]
+                - SCHEDULE_REFRESH_ADVANCE_SEC, SCHEDULE_REFRESH_ADVANCE_SEC)
+
     _LOGGER.debug(
         "Registering next token refresh in %s seconds",
-        director_token_dict["validSeconds"],
+        delay,
     )
     obj = RefreshTokensObject(hass, entry)
     entry_data[CONF_CANCEL_TOKEN_REFRESH_CALLBACK] = async_call_later(
         hass=hass,
-        delay=director_token_dict["validSeconds"],
+        delay=delay,
         action=obj.refresh_tokens,
     )
 
@@ -300,11 +307,31 @@ class RefreshTokensObject:
         """Initialize a RefreshTokensObject by storing the HomeAssistant and ConfigEntry objects required to run refresh_tokens()."""
         self.hass = hass
         self.entry = entry
+        self.retries = 0
 
     async def refresh_tokens(self, datetime):
         """Call the refresh_tokens function to store updated authentication and director tokens in hass.data."""
         # unused datetime parameter is required, since Home Assistant will pass a datetime.datetime object as parameter when calling this function via async_call_later()
-        return await refresh_tokens(self.hass, self.entry)
+        return await self._refresh_token_with_retry()
+
+    async def _refresh_token_with_retry(self):
+        try:
+            await refresh_tokens(self.hass, self.entry)
+        except ConfigEntryNotReady:
+            self._schedule_refresh_retry()
+
+    def _schedule_refresh_retry(self):
+        self.retries += 1
+        # exponential backoff with jitter
+        delay = random.uniform(0, min(2**self.retries, RETRY_BACKOFF_MAX_SEC))
+        _LOGGER.warning("Token refresh failed, trying again in %s seconds",
+                        delay)
+        entry_data = self.hass.data[DOMAIN][self.entry.entry_id]
+        entry_data[CONF_CANCEL_TOKEN_REFRESH_CALLBACK] = async_call_later(
+            hass=self.hass,
+            delay=delay,
+            action=self.refresh_tokens,
+        )
 
 
 class Control4Entity(Entity):
