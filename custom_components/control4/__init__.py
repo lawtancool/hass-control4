@@ -75,7 +75,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Add Control4 controller to device registry
     try:
-        controller_href = (await entry_data[CONF_ACCOUNT].getAccountControllers())["href"]
+        controller_href = (await entry_data[CONF_ACCOUNT].getAccountControllers())[
+            "href"
+        ]
     except (client_exceptions.ClientError, asyncio.TimeoutError) as exception:
         raise ConfigEntryNotReady(exception) from exception
 
@@ -171,10 +173,13 @@ async def get_items_of_category(hass: HomeAssistant, entry: ConfigEntry, categor
         return_list = await director.getAllItemsByCategory(category)
         return json.loads(return_list)
     except InvalidCategory as e:
-        _LOGGER.warning("Category %s does not exist on this Control4 system, \
-                        entities from this domain will not be setup.", category, exc_info=True)
+        _LOGGER.warning(
+            "Category %s does not exist on this Control4 system, \
+                        entities from this domain will not be setup.",
+            category,
+            exc_info=True,
+        )
         return []
-    
 
 
 async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
@@ -236,8 +241,10 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
         raise ConfigEntryNotReady(exception) from exception
 
     # Schedule refresh 5mins before expiry, but no sooner than 5mins from now
-    delay = max(director_token_dict["validSeconds"]
-                - SCHEDULE_REFRESH_ADVANCE_SEC, SCHEDULE_REFRESH_ADVANCE_SEC)
+    delay = max(
+        director_token_dict["validSeconds"] - SCHEDULE_REFRESH_ADVANCE_SEC,
+        SCHEDULE_REFRESH_ADVANCE_SEC,
+    )
 
     _LOGGER.debug(
         "Registering next token refresh in %s seconds",
@@ -324,8 +331,7 @@ class RefreshTokensObject:
         self.retries += 1
         # exponential backoff with jitter
         delay = random.uniform(0, min(2**self.retries, RETRY_BACKOFF_MAX_SEC))
-        _LOGGER.warning("Token refresh failed, trying again in %s seconds",
-                        delay)
+        _LOGGER.warning("Token refresh failed, trying again in %s seconds", delay)
         entry_data = self.hass.data[DOMAIN][self.entry.entry_id]
         entry_data[CONF_CANCEL_TOKEN_REFRESH_CALLBACK] = async_call_later(
             hass=self.hass,
