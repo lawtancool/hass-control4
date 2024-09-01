@@ -2,19 +2,22 @@
 from __future__ import annotations
 
 import logging
+import math
 
 from pyControl4.light import C4Light
 
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
     ATTR_TRANSITION,
-    SUPPORT_BRIGHTNESS,
-    SUPPORT_TRANSITION,
     LightEntity,
+    LightEntityFeature,
+    ColorMode,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util.color import value_to_brightness
+from homeassistant.util.percentage import percentage_to_ranged_value
 
 from . import Control4Entity, get_items_of_category
 from .const import CONF_DIRECTOR, CONTROL4_ENTITY_TYPE, DOMAIN
@@ -23,6 +26,7 @@ from .director_utils import director_get_entry_variables
 _LOGGER = logging.getLogger(__name__)
 
 CONTROL4_CATEGORY = "lights"
+CONTROL4_BRIGHTNESS_SCALE = (1, 100)
 
 
 async def async_setup_entry(
@@ -107,20 +111,40 @@ class Control4Light(Control4Entity, LightEntity):
     def brightness(self):
         """Return the brightness of this light between 0..255."""
         if "LIGHT_LEVEL" in self.extra_state_attributes:
-            return self.extra_state_attributes["LIGHT_LEVEL"] * 2.55
+            return value_to_brightness(
+                CONTROL4_BRIGHTNESS_SCALE, 
+                self.extra_state_attributes["LIGHT_LEVEL"]
+            )
         if "Brightness Percent" in self.extra_state_attributes:
-            return self.extra_state_attributes["Brightness Percent"] * 2.55
+            return value_to_brightness(
+                CONTROL4_BRIGHTNESS_SCALE,
+                self.extra_state_attributes["Brightness Percent"]
+            )
 
     @property
     def supported_features(self) -> int:
         """Flag supported features."""
         if self._is_dimmer:
-            return SUPPORT_BRIGHTNESS | SUPPORT_TRANSITION
+            return LightEntityFeature.TRANSITION
         return 0
 
     @property
+    def color_mode(self) -> ColorMode:
+        if self._is_dimmer:
+            return ColorMode.BRIGHTNESS
+        return ColorMode.ONOFF
+
+    @property
+    def supported_color_modes(self) -> set[ColorMode]:
+        if self._is_dimmer:
+            return {ColorMode.BRIGHTNESS}
+        return {ColorMode.ONOFF}
+
+    @property
     def _is_dimmer(self):
-        return bool("LIGHT_LEVEL" in self.extra_state_attributes) or bool("Brightness Percent" in self.extra_state_attributes)
+        return bool("LIGHT_LEVEL" in self.extra_state_attributes) or bool(
+            "Brightness Percent" in self.extra_state_attributes
+        )
 
     async def async_turn_on(self, **kwargs) -> None:
         """Turn the entity on."""
@@ -131,7 +155,11 @@ class Control4Light(Control4Entity, LightEntity):
             else:
                 transition_length = 0
             if ATTR_BRIGHTNESS in kwargs:
-                brightness = (kwargs[ATTR_BRIGHTNESS] / 255) * 100
+                brightness = math.ceil(
+                    percentage_to_ranged_value(
+                        CONTROL4_BRIGHTNESS_SCALE, kwargs[ATTR_BRIGHTNESS]
+                    )
+                )
             else:
                 brightness = 100
             await c4_light.rampToLevel(brightness, transition_length)
