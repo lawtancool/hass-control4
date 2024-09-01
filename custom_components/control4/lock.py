@@ -106,7 +106,7 @@ class Control4Lock(Control4Entity, LockEntity):
                 await self._data_to_extra_state_attributes(data["relay_state"])
 
         _LOGGER.debug("Message for device %s", device)
-        self.schedule_update_ha_state()
+        self.async_write_ha_state()
 
     @property
     def is_locked(self):

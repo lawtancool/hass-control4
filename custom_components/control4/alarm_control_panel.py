@@ -1,24 +1,16 @@
 """Platform for Control4 Alarm Control Panel."""
 from __future__ import annotations
 
-from datetime import timedelta
 import json
 import logging
 
 from pyControl4.alarm import C4SecurityPanel
-from pyControl4.error_handling import C4Exception
 import voluptuous
 
 from homeassistant.components.alarm_control_panel import (
-    FORMAT_NUMBER,
-    SUPPORT_ALARM_ARM_AWAY,
-    SUPPORT_ALARM_ARM_HOME,
     AlarmControlPanelEntity,
-)
-from homeassistant.components.alarm_control_panel.const import (
-    SUPPORT_ALARM_ARM_CUSTOM_BYPASS,
-    SUPPORT_ALARM_ARM_NIGHT,
-    SUPPORT_ALARM_ARM_VACATION,
+    AlarmControlPanelEntityFeature,
+    CodeFormat,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
@@ -34,7 +26,6 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv, entity_platform
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from . import Control4Entity, get_items_of_category
 from .const import (
@@ -84,106 +75,6 @@ CONTROL4_PARTITION_STATE_DATA_MAPPING = {
     "trouble": "TROUBLE_TEXT",
     "text": "DISPLAY_TEXT",
 }
-
-
-# async def async_setup_entry(
-#     hass: HomeAssistant, entry: ConfigEntry, async_add_entities
-# ):
-#     """Set up Control4 alarm control panels from a config entry."""
-#     entry_data = hass.data[DOMAIN][entry.entry_id]
-#     scan_interval = entry_data[CONF_SCAN_INTERVAL]
-#     _LOGGER.debug(
-#         "Scan interval = %s",
-#         scan_interval,
-#     )
-
-#     # Register alarm_control_panel specific service
-#     platform = entity_platform.current_platform.get()
-#     platform.async_register_entity_service(
-#         "send_alarm_keystrokes",
-#         {voluptuous.Required("keystrokes"): cv.string},
-#         "send_alarm_keystrokes",
-#     )
-
-#     async def async_update_data():
-#         """Fetch data from Control4 director for alarm control panels."""
-#         variables = ","
-#         variables = variables.join(
-#             [
-#                 CONTROL4_ARMED_AWAY_VAR,
-#                 CONTROL4_ARMED_HOME_VAR,
-#                 CONTROL4_DISARMED_VAR,
-#                 CONTROL4_ALARM_STATE_VAR,
-#                 CONTROL4_DISPLAY_TEXT_VAR,
-#                 CONTROL4_TROUBLE_TEXT_VAR,
-#                 CONTROL4_PARTITION_STATE_VAR,
-#                 CONTROL4_DELAY_TIME_REMAINING_VAR,
-#                 CONTROL4_OPEN_ZONE_COUNT_VAR,
-#                 CONTROL4_ALARM_TYPE_VAR,
-#                 CONTROL4_ARMED_TYPE_VAR,
-#                 CONTROL4_LAST_EMERGENCY_VAR,
-#                 CONTROL4_LAST_ARM_FAILURE_VAR,
-#             ]
-#         )
-#         try:
-#             return await director_update_data_multi_variable(hass, entry, variables)
-#         except C4Exception as err:
-#             raise UpdateFailed(f"Error communicating with API: {err}") from err
-
-#     coordinator = DataUpdateCoordinator(
-#         hass,
-#         _LOGGER,
-#         name="alarm_control_panel",
-#         update_method=async_update_data,
-#         update_interval=timedelta(seconds=scan_interval),
-#     )
-
-#     # Fetch initial data so we have data when entities subscribe
-#     await coordinator.async_refresh()
-
-#     items_of_category = await get_items_of_category(hass, entry, CONTROL4_CATEGORY)
-#     director = entry_data[CONF_DIRECTOR]
-#     for item in items_of_category:
-#         if (
-#             item["type"] == CONTROL4_ENTITY_TYPE
-#             and item["control"] == CONTROL4_CATEGORY
-#         ):
-#             item_name = item["name"]
-#             item_id = item["id"]
-#             item_parent_id = item["parentId"]
-#             item_coordinator = coordinator
-
-#             item_setup_info = await director.getItemSetup(item_id)
-#             item_setup_info = json.loads(item_setup_info)
-#             item_enabled = item_setup_info["setup"]["enabled"]
-
-#             item_manufacturer = None
-#             item_device_name = None
-#             item_model = None
-
-#             for parent_item in items_of_category:
-#                 if parent_item["id"] == item_parent_id:
-#                     item_manufacturer = parent_item["manufacturer"]
-#                     item_device_name = parent_item["name"]
-#                     item_model = parent_item["model"]
-#                     break
-#             async_add_entities(
-#                 [
-#                     Control4AlarmControlPanel(
-#                         entry_data,
-#                         entry,
-#                         item_coordinator,
-#                         item_name,
-#                         item_id,
-#                         item_device_name,
-#                         item_manufacturer,
-#                         item_model,
-#                         item_parent_id,
-#                         item_enabled,
-#                     )
-#                 ],
-#                 True,
-#             )
 
 
 async def async_setup_entry(
@@ -328,7 +219,7 @@ class Control4AlarmControlPanel(Control4Entity, AlarmControlPanelEntity):
             else:
                 await self._data_to_extra_state_attributes(data)
         _LOGGER.debug("Message for device %s", device)
-        self.schedule_update_ha_state()
+        self.async_write_ha_state()
 
     def create_api_object(self):
         """Create a pyControl4 device object.
@@ -345,25 +236,25 @@ class Control4AlarmControlPanel(Control4Entity, AlarmControlPanelEntity):
     @property
     def code_format(self):
         """Regex for code format or None if no code is required."""
-        return FORMAT_NUMBER
+        return CodeFormat.NUMBER
 
     @property
     def supported_features(self) -> int:
         """Flag supported features."""
         flags = 0
         if not self.entry_data[CONF_ALARM_AWAY_MODE] == DEFAULT_ALARM_AWAY_MODE:
-            flags |= SUPPORT_ALARM_ARM_AWAY
+            flags |= AlarmControlPanelEntityFeature.ARM_AWAY
         if not self.entry_data[CONF_ALARM_HOME_MODE] == DEFAULT_ALARM_HOME_MODE:
-            flags |= SUPPORT_ALARM_ARM_HOME
+            flags |= AlarmControlPanelEntityFeature.ARM_HOME
         if not self.entry_data[CONF_ALARM_NIGHT_MODE] == DEFAULT_ALARM_NIGHT_MODE:
-            flags |= SUPPORT_ALARM_ARM_NIGHT
+            flags |= AlarmControlPanelEntityFeature.ARM_NIGHT
         if (
             not self.entry_data[CONF_ALARM_CUSTOM_BYPASS_MODE]
             == DEFAULT_ALARM_CUSTOM_BYPASS_MODE
         ):
-            flags |= SUPPORT_ALARM_ARM_CUSTOM_BYPASS
+            flags |= AlarmControlPanelEntityFeature.ARM_CUSTOM_BYPASS
         if not self.entry_data[CONF_ALARM_VACATION_MODE] == DEFAULT_ALARM_VACATION_MODE:
-            flags |= SUPPORT_ALARM_ARM_VACATION
+            flags |= AlarmControlPanelEntityFeature.ARM_VACATION
         return flags
 
     @property
@@ -395,39 +286,6 @@ class Control4AlarmControlPanel(Control4Entity, AlarmControlPanelEntity):
         alarm_state = self.extra_state_attributes[CONTROL4_ALARM_TYPE_VAR]
         if alarm_state:
             return STATE_ALARM_TRIGGERED
-
-        # disarmed = self.extra_state_attributes[CONTROL4_DISARMED_VAR]
-        # armed_home = self.extra_state_attributes[CONTROL4_ARMED_HOME_VAR]
-        # armed_away = self.extra_state_attributes[CONTROL4_ARMED_AWAY_VAR]
-        # if disarmed == 1:
-        #     return STATE_ALARM_DISARMED
-        # if armed_home == 1:
-        #     return STATE_ALARM_ARMED_HOME
-        # if armed_away == 1:
-        #     return STATE_ALARM_ARMED_AWAY
-
-    # @property
-    # def device_state_attributes(self):
-    #     """Return the state attributes."""
-    #     state_attr = {}
-    #     all_vars = [
-    #         CONTROL4_DISPLAY_TEXT_VAR,
-    #         CONTROL4_TROUBLE_TEXT_VAR,
-    #         CONTROL4_PARTITION_STATE_VAR,
-    #         CONTROL4_DELAY_TIME_REMAINING_VAR,
-    #         CONTROL4_OPEN_ZONE_COUNT_VAR,
-    #         CONTROL4_ALARM_STATE_VAR,
-    #         CONTROL4_ALARM_TYPE_VAR,
-    #         CONTROL4_ARMED_TYPE_VAR,
-    #         CONTROL4_LAST_EMERGENCY_VAR,
-    #         CONTROL4_LAST_ARM_FAILURE_VAR,
-    #     ]
-    #     for var in all_vars:
-    #         state_attr[var.lower()] = self.coordinator.data[self._idx][var]
-    #     state_attr[CONTROL4_ALARM_STATE_VAR.lower()] = bool(
-    #         self.coordinator.data[self._idx][CONTROL4_ALARM_STATE_VAR]
-    #     )
-    #     return state_attr
 
     async def async_alarm_arm_away(self, code=None):
         """Send arm away command."""
