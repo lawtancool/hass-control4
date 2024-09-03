@@ -4,7 +4,7 @@ This custom integration for Home Assistant allows control of Control4 lights, lo
 
 ## Installation
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=lawtancool&repository=hass-control4)
 
 Add this repository as a custom repository in HACS to install the integration. Once this is done, the setup process is exactly the same as the default integration: https://www.home-assistant.io/integrations/control4
 
