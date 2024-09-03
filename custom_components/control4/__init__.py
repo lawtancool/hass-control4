@@ -68,7 +68,7 @@ PLATFORMS = [
     Platform.ALARM_CONTROL_PANEL,
     Platform.BINARY_SENSOR,
     Platform.LOCK,
-    Platform.MEDIA_PLAYER
+    Platform.MEDIA_PLAYER,
 ]
 
 
@@ -118,9 +118,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryNotReady(exception) from exception
     director_all_items = json.loads(director_all_items)
     entry_data[CONF_DIRECTOR_ALL_ITEMS] = director_all_items
-    
-    entry_data[CONF_UI_CONFIGURATION] = json.loads(await entry_data[CONF_DIRECTOR].getUiConfiguration())
-    
+
+    entry_data[CONF_UI_CONFIGURATION] = json.loads(
+        await entry_data[CONF_DIRECTOR].getUiConfiguration()
+    )
+
     # Load options from config entry
     entry_data[CONF_SCAN_INTERVAL] = entry.options.get(
         CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
@@ -467,6 +469,7 @@ class Control4Entity(Entity):
         """Return Extra state attributes."""
         return self._extra_state_attributes
 
+
 class Control4CoordinatorEntity(CoordinatorEntity[Any]):
     """Base entity for Control4."""
 
@@ -480,6 +483,8 @@ class Control4CoordinatorEntity(CoordinatorEntity[Any]):
         device_manufacturer: str | None,
         device_model: str | None,
         device_id: int,
+        device_area: str,
+        device_attributes: dict,
     ) -> None:
         """Initialize a Control4 entity."""
         super().__init__(coordinator)
@@ -492,6 +497,10 @@ class Control4CoordinatorEntity(CoordinatorEntity[Any]):
         self._device_manufacturer = device_manufacturer
         self._device_model = device_model
         self._device_id = device_id
+        self._device_area = device_area
+        self._extra_state_attributes = device_attributes
+        self._extra_state_attributes["item id"] = idx
+        self._extra_state_attributes["parent item id"] = device_id
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -502,4 +511,11 @@ class Control4CoordinatorEntity(CoordinatorEntity[Any]):
             model=self._device_model,
             name=self._device_name,
             via_device=(DOMAIN, self._controller_unique_id),
+            suggested_area=self._device_area,
         )
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Return Extra state attributes."""
+        self._extra_state_attributes.update(self.coordinator.data[self._idx])
+        return self._extra_state_attributes

@@ -1,7 +1,8 @@
 """Platform for Control4 Rooms Media Players."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+import base64
+from dataclasses import dataclass, field
 from datetime import timedelta
 import enum
 import logging
@@ -19,13 +20,16 @@ from homeassistant.components.media_player import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_SCAN_INTERVAL
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from . import Control4CoordinatorEntity
 from .const import CONF_DIRECTOR, CONF_DIRECTOR_ALL_ITEMS, CONF_UI_CONFIGURATION, DOMAIN
-from .director_utils import update_variables_for_config_entry
+from .director_utils import (
+    director_get_entry_variables,
+    update_variables_for_config_entry,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,6 +55,10 @@ VARIABLES_OF_INTEREST = {
     CONTROL4_STOPPED,
 }
 
+CONTROL4_MEDIA_JOIN_EVENT = "control4_media_join"
+CONTROL4_MEDIA_JOIN_EVENT_ENTITIES = "joining_entities"
+CONTROL4_MEDIA_JOIN_EVENT_SOURCE_IDX = "source_idx"
+
 
 class _SourceType(enum.Enum):
     AUDIO = 1
@@ -64,6 +72,7 @@ class _RoomSource:
     source_type: set[_SourceType]
     idx: int
     name: str
+    group_members: set[str] = field(default_factory=set)
 
 
 async def get_rooms(hass: HomeAssistant, entry: ConfigEntry):
@@ -119,17 +128,20 @@ async def async_setup_entry(
     }
 
     ui_config = entry_data[CONF_UI_CONFIGURATION]
+    sources: dict[int, _RoomSource] = {}
 
     entity_list = []
     for room in all_rooms:
         room_id = room["id"]
+        room_has_valid_experience = False
 
-        sources: dict[int, _RoomSource] = {}
+        room_sources: dict[int, _RoomSource] = {}
         for exp in ui_config["experiences"]:
             if room_id == exp["room_id"]:
                 exp_type = exp["type"]
                 if exp_type not in ("listen", "watch"):
                     continue
+                room_has_valid_experience = True
 
                 dev_type = (
                     _SourceType.AUDIO if exp_type == "listen" else _SourceType.VIDEO
@@ -145,26 +157,31 @@ async def async_setup_entry(
                         sources[dev_id] = _RoomSource(
                             source_type={dev_type}, idx=dev_id, name=name
                         )
+                    room_sources[dev_id] = sources[dev_id]
 
-        try:
-            hidden = room["roomHidden"]
-            entity_list.append(
-                Control4Room(
-                    entry_data,
-                    coordinator,
-                    room["name"],
-                    room_id,
-                    item_to_parent_map,
-                    sources,
-                    hidden,
+        if room_has_valid_experience:
+            item_attributes = await director_get_entry_variables(hass, entry, room_id)
+            try:
+                hidden = room["roomHidden"]
+                entity_list.append(
+                    Control4Room(
+                        hass,
+                        entry_data,
+                        coordinator,
+                        room["name"],
+                        room_id,
+                        item_to_parent_map,
+                        room_sources,
+                        hidden,
+                        item_attributes,
+                    )
                 )
-            )
-        except KeyError:
-            _LOGGER.exception(
-                "Unknown device properties received from Control4: %s",
-                room,
-            )
-            continue
+            except KeyError:
+                _LOGGER.exception(
+                    "Unknown device properties received from Control4: %s",
+                    room,
+                )
+                continue
 
     async_add_entities(entity_list, True)
 
@@ -176,6 +193,7 @@ class Control4Room(Control4CoordinatorEntity, MediaPlayerEntity):
 
     def __init__(
         self,
+        hass: HomeAssistant,
         entry_data: dict,
         coordinator: DataUpdateCoordinator[dict[int, dict[str, Any]]],
         name: str,
@@ -183,6 +201,7 @@ class Control4Room(Control4CoordinatorEntity, MediaPlayerEntity):
         id_to_parent: dict[int, int],
         sources: dict[int, _RoomSource],
         room_hidden: bool,
+        device_attributes: dict,
     ) -> None:
         """Initialize Control4 room entity."""
         super().__init__(
@@ -194,7 +213,10 @@ class Control4Room(Control4CoordinatorEntity, MediaPlayerEntity):
             device_manufacturer=None,
             device_model=None,
             device_id=room_id,
+            device_area=name,
+            device_attributes=device_attributes,
         )
+        self.hass = hass
         self._attr_entity_registry_enabled_default = not room_hidden
         self._id_to_parent = id_to_parent
         self._sources = sources
@@ -207,7 +229,36 @@ class Control4Room(Control4CoordinatorEntity, MediaPlayerEntity):
             | MediaPlayerEntityFeature.VOLUME_STEP
             | MediaPlayerEntityFeature.TURN_OFF
             | MediaPlayerEntityFeature.SELECT_SOURCE
+            | MediaPlayerEntityFeature.GROUPING
         )
+        self._current_source: _RoomSource | None = None
+        self.hass.bus.async_listen(CONTROL4_MEDIA_JOIN_EVENT,
+                                   self._handle_join)
+
+    async def _handle_join(self, event) -> None:
+        joining_entities = event.data.get(CONTROL4_MEDIA_JOIN_EVENT_ENTITIES)
+        if self.entity_id in joining_entities:
+            source_idx = event.data.get(CONTROL4_MEDIA_JOIN_EVENT_SOURCE_IDX)
+            if source_idx in self._sources:
+                await self.async_select_source(self._sources[source_idx].name)
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        updated_source_idx = self._get_current_playing_device_id()
+        if (
+            self._current_source is not None
+            and self._current_source.idx != updated_source_idx
+        ):
+            self._current_source.group_members.remove(self.entity_id)
+
+        if updated_source_idx in self._sources:
+            self._current_source = self._sources[updated_source_idx]
+            self._current_source.group_members.add(self.entity_id)
+        else:
+            self._current_source = None
+
+        self.async_write_ha_state()
 
     def _create_api_object(self):
         """Create a pyControl4 device object.
@@ -298,6 +349,47 @@ class Control4Room(Control4CoordinatorEntity, MediaPlayerEntity):
         return self._sources[current_source].name
 
     @property
+    def media_playlist(self) -> str | None:
+        media_info = self._get_media_info()
+        if not media_info or "genre" not in media_info:
+            return None
+        return base64.b64decode(media_info["genre"]).decode("ascii")
+
+    @property
+    def media_image_url(self) -> str | None:
+        media_info = self._get_media_info()
+        if not media_info or "img" not in media_info:
+            return None
+
+        url = base64.b64decode(media_info["img"]).decode("ascii")
+        base_url_http = self.entry_data[CONF_DIRECTOR].base_url.replace(
+            "https://", "http://"
+        )  # avoid self-signed cert issue
+        url = url.replace("controller:/", base_url_http)
+        return url
+
+    @property
+    def media_artist(self) -> str | None:
+        media_info = self._get_media_info()
+        if not media_info or "artist" not in media_info:
+            return None
+        return media_info["artist"]
+
+    @property
+    def media_album_name(self) -> str | None:
+        media_info = self._get_media_info()
+        if not media_info or "album" not in media_info:
+            return None
+        return media_info["album"]
+
+    @property
+    def media_channel(self) -> str | None:
+        media_info = self._get_media_info()
+        if not media_info or "channel" not in media_info:
+            return None
+        return media_info["channel"]
+
+    @property
     def media_content_type(self):
         """Get current content type if available."""
         current_source = self._get_current_playing_device_id()
@@ -332,8 +424,18 @@ class Control4Room(Control4CoordinatorEntity, MediaPlayerEntity):
         """Check if the volume is muted."""
         return bool(self.coordinator.data[self._idx][CONTROL4_MUTED_STATE])
 
+    @property
+    def group_members(self) -> list[str] | None:
+        current_source = self._get_current_playing_device_id()
+        if not current_source or current_source not in self._sources:
+            return None
+        return list(self._sources[current_source].group_members)
+
     async def async_select_source(self, source):
         """Select a new source."""
+        current_source = self._get_current_playing_device_id()
+        if current_source in self._sources:
+            self._sources[current_source].group_members.remove(self.entity_id)
         for avail_source in self._sources.values():
             if avail_source.name == source:
                 audio_only = _SourceType.VIDEO not in avail_source.source_type
@@ -343,9 +445,23 @@ class Control4Room(Control4CoordinatorEntity, MediaPlayerEntity):
                     await self._create_api_object().setVideoAndAudioSource(
                         avail_source.idx
                     )
+                avail_source.group_members.add(self.entity_id)
                 break
 
         await self.coordinator.async_request_refresh()
+
+    async def async_join_players(self, group_members):
+        current_source = self._get_current_playing_device_id()
+        if current_source and current_source in self._sources:
+            event_data = {
+                CONTROL4_MEDIA_JOIN_EVENT_SOURCE_IDX:
+                    self._sources[current_source].idx,
+                CONTROL4_MEDIA_JOIN_EVENT_ENTITIES: group_members,
+            }
+            self.hass.bus.async_fire(CONTROL4_MEDIA_JOIN_EVENT, event_data)
+
+    async def async_unjoin_player(self):
+        await self.async_turn_off()
 
     async def async_turn_off(self):
         """Turn off the room."""
