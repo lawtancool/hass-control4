@@ -9,9 +9,14 @@ from pyControl4.error_handling import NotFound, Unauthorized
 import voluptuous as vol
 
 from homeassistant import config_entries, exceptions
-from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
+from homeassistant.const import (
+    CONF_HOST,
+    CONF_PASSWORD,
+    CONF_USERNAME,
+    CONF_SCAN_INTERVAL,
+)
 from homeassistant.core import callback
-from homeassistant.helpers import aiohttp_client
+from homeassistant.helpers import aiohttp_client, config_validation as cv
 from homeassistant.helpers.device_registry import format_mac
 
 from .const import (
@@ -27,7 +32,9 @@ from .const import (
     DEFAULT_ALARM_HOME_MODE,
     DEFAULT_ALARM_NIGHT_MODE,
     DEFAULT_ALARM_VACATION_MODE,
+    DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    MIN_SCAN_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -196,6 +203,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         _LOGGER.debug(self.entry_data[CONF_ALARM_ARM_STATES])
         data_schema = vol.Schema(
             {
+                vol.Optional(
+                    CONF_SCAN_INTERVAL,
+                    default=self.config_entry.options.get(
+                        CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+                    ),
+                ): vol.All(cv.positive_int, vol.Clamp(min=MIN_SCAN_INTERVAL)),
                 vol.Optional(
                     CONF_ALARM_AWAY_MODE,
                     default=self.config_entry.options.get(
