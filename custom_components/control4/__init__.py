@@ -1,6 +1,5 @@
 """The Control4 integration."""
 from __future__ import annotations
-
 import asyncio
 import json
 import logging
@@ -14,6 +13,10 @@ from pyControl4.error_handling import BadCredentials, InvalidCategory
 from pyControl4.websocket import C4Websocket
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+import ssl
+
+
 from homeassistant.const import (
     CONF_HOST,
     CONF_PASSWORD,
@@ -22,7 +25,6 @@ from homeassistant.const import (
     Platform,
     CONF_SCAN_INTERVAL,
 )
-from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client, device_registry as dr
 from homeassistant.helpers.entity import DeviceInfo, Entity
@@ -70,6 +72,9 @@ PLATFORMS = [
     Platform.LOCK,
     Platform.MEDIA_PLAYER,
 ]
+
+context = ssl.create_default_context()
+#await run_in_executor(None, context.load_default_certs)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -240,10 +245,11 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
         _LOGGER.debug("First time setup, creating new C4Websocket object")
         connection_tracker = C4WebsocketConnectionTracker(hass, entry)
         websocket = C4Websocket(
-            config[CONF_HOST],
-            no_verify_ssl_session,
-            connection_tracker.connect_callback,
-            connection_tracker.disconnect_callback,
+            ip=config[CONF_HOST],
+            session_no_verify_ssl=no_verify_ssl_session,
+            connect_callback=connection_tracker.connect_callback,
+            disconnect_callback=connection_tracker.disconnect_callback,
+            ssl_context=context,
         )
         entry_data[CONF_WEBSOCKET] = websocket
 
