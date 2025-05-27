@@ -145,15 +145,18 @@ class Control4BinarySensor(Control4Entity, BinarySensorEntity):
         )
         self._device_class = device_class
         self._extra_state_attributes["alarm_zone_id"] = alarm_zone_id
-        self._extra_state_attributes["ContactState"] = bool(
-            self._extra_state_attributes["ContactState"]
-        )
+        self._attr_available = True
+        if "ContactState" in self._extra_state_attributes:
+            self._extra_state_attributes["ContactState"] = bool(
+                self._extra_state_attributes["ContactState"]
+            )
         self._extra_state_attributes["StateVerified"] = bool(
             self._extra_state_attributes["StateVerified"]
         )
 
     async def _update_callback(self, device, message):
-        """Update state attributes in hass after receiving a Websocket update for our item id/parent device id."""
+        """Update state attributes in hass after receiving a Websocket
+        update for our item id/parent device id."""
         _LOGGER.debug(message)
 
         # Message will be False when a Websocket disconnect is detected
@@ -163,6 +166,12 @@ class Control4BinarySensor(Control4Entity, BinarySensorEntity):
             self._attr_available = True
             data = message["data"]
             # Extra handling for alarm specific messages
+            if "zone_state" in data:
+                self._extra_state_attributes["ContactState"] = bool(
+                    not data["zone_state"].pop("is_open")
+                )
+                self._extra_state_attributes["LastActionTime"] = message["time"]
+
             if "contact_state" in data:
                 self._extra_state_attributes["ContactState"] = bool(
                     data["contact_state"].pop("current_state") == "CLOSED"
@@ -172,6 +181,18 @@ class Control4BinarySensor(Control4Entity, BinarySensorEntity):
                 ].pop("is_verified")
                 self._extra_state_attributes["LastActionTime"] = message["time"]
                 await self._data_to_extra_state_attributes(data["contact_state"])
+
+            if "relay_state" in data:
+                self._extra_state_attributes["ContactState"] = bool(
+                    data["relay_state"].pop("current_state") == "CLOSED"
+                )
+                self._extra_state_attributes["StateVerified"] = data["relay_state"].pop(
+                    "is_verified"
+                )
+
+                self._extra_state_attributes["LastActionTime"] = message["time"]
+                await self._data_to_extra_state_attributes(data["relay_state"])
+
         _LOGGER.debug("Message for device %s", device)
         self.async_write_ha_state()
 
@@ -180,8 +201,16 @@ class Control4BinarySensor(Control4Entity, BinarySensorEntity):
         """Return true if the binary sensor is on."""
         # In Control4, True = closed/clear and False = open/not clear
         # For some reason, Control4 gives us ContactState on entity init,
-        # but updates STATE when changes occur (the value of ContactState is never updated)
-        return not bool(self.extra_state_attributes["ContactState"])
+        # but updates STATE when changes occur (the value of ContactState is
+        # never updated)
+        if "ContactState" in self._extra_state_attributes:
+            return not bool(self.extra_state_attributes["ContactState"])
+        _LOGGER.warning(
+            "ContactState not found in extra_state_attributes: %s",
+            str(self._extra_state_attributes),
+        )
+
+        return False
 
     @property
     def device_class(self):
