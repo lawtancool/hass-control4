@@ -71,10 +71,11 @@ PLATFORMS = [
     Platform.BINARY_SENSOR,
     Platform.LOCK,
     Platform.MEDIA_PLAYER,
+    Platform.SWITCH,
+    Platform.FAN,
+    Platform.CLIMATE,
 ]
 
-context = ssl.create_default_context()
-#await run_in_executor(None, context.load_default_certs)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -249,7 +250,6 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
             session_no_verify_ssl=no_verify_ssl_session,
             connect_callback=connection_tracker.connect_callback,
             disconnect_callback=connection_tracker.disconnect_callback,
-            ssl_context=context,
         )
         entry_data[CONF_WEBSOCKET] = websocket
 
@@ -398,10 +398,10 @@ class Control4Entity(Entity):
         self._extra_state_attributes["parent item id"] = device_id
         # Disable polling
         self._attr_should_poll = False
-
     async def async_added_to_hass(self):
         """Add entity to hass. Register Websockets callbacks to receive entity state updates from Control4."""
         await super().async_added_to_hass()
+        
         await self.hass.async_add_executor_job(
             self.entry_data[CONF_WEBSOCKET].add_item_callback,
             self._idx,
@@ -412,11 +412,6 @@ class Control4Entity(Entity):
             self.entry_data[CONF_WEBSOCKET].add_item_callback,
             self._device_id,
             self._update_callback,
-        )
-        _LOGGER.debug(
-            "Registering parent device %s of item id %s for callback",
-            self._device_id,
-            self._idx,
         )
         return True
 
@@ -445,7 +440,7 @@ class Control4Entity(Entity):
             self._attr_available = True
             data = message["data"]
             await self._data_to_extra_state_attributes(data)
-        _LOGGER.debug("Message for device %s", device)
+        _LOGGER.debug("x Message for device %s", device)
         self.async_write_ha_state()
 
     async def _data_to_extra_state_attributes(self, data) -> None:

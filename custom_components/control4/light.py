@@ -39,7 +39,7 @@ async def async_setup_entry(
 
     for item in items_of_category:
         try:
-            if item["type"] == CONTROL4_ENTITY_TYPE and item["id"]:
+            if item["type"] == CONTROL4_ENTITY_TYPE and item["id"] and item["proxy"] != "fan":
                 item_name = str(item["name"])
                 item_id = item["id"]
                 item_area = item["roomName"]
