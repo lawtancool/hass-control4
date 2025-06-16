@@ -28,7 +28,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from pyControl4.error_handling import C4Exception
-from .pyControl4.climate import C4Climate
+from pyControl4.climate import C4Climate
 
 from . import Control4Entity, get_items_of_category
 from .const import CONF_DIRECTOR, CONTROL4_ENTITY_TYPE, DOMAIN

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 
-from .pyControl4.fan import C4Fan
+from pyControl4.fan import C4Fan
 
 import json
 from typing import Any

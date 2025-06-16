@@ -23,8 +23,6 @@ CONTROL4_RELAY_PROXY_TYPES = {
     "cardaccess_wirelessrelay": "Wireless Relay",
 }
 
-# How long to pulse the relay in seconds (for momentary contact applications)
-RELAY_PULSE_TIME = 0.5
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
@@ -159,14 +157,7 @@ class Control4Switch(Control4Entity, SwitchEntity):
         """Turn the switch on."""
         c4_relay = self.create_api_object()
         try:
-            # For basic relays, we'll pulse them briefly
-            if self._proxy_type == "relaysingle_relay_c4":
-                await c4_relay.close()
-                await asyncio.sleep(RELAY_PULSE_TIME)
-                await c4_relay.open()
-            else:
-                # For other relay types, maintain the state
-                await c4_relay.close()
+            await c4_relay.close()
         except Exception as err:
             _LOGGER.error("Error controlling relay: %s", err)
             # Make sure the relay is opened if there's an error
@@ -182,6 +173,15 @@ class Control4Switch(Control4Entity, SwitchEntity):
             await c4_relay.open()
         except Exception as err:
             _LOGGER.error("Error controlling relay: %s", err)
+    
+    async def async_toggle(self, **kwargs):
+        """Toggle relay."""
+        c4_relay = self.create_api_object()
+        try:
+            await c4_relay.toggle()
+        except Exception as err:
+            _LOGGER.error("Error controlling relay: %s", err)
+
 
     @property
     def extra_state_attributes(self):
