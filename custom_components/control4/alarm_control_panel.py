@@ -1,4 +1,5 @@
 """Platform for Control4 Alarm Control Panel."""
+
 from __future__ import annotations
 
 import json
@@ -66,24 +67,6 @@ CONTROL4_PARTITION_STATE_DATA_MAPPING = {
     "text": "DISPLAY_TEXT",
 }
 
-# Map Control4 states to Home Assistant states
-CONTROL4_STATE_MAPPING = {
-    CONTROL4_EXIT_DELAY_STATE: AlarmControlPanelState.ARMING,
-    CONTROL4_ENTRY_DELAY_STATE: AlarmControlPanelState.PENDING,
-    CONTROL4_ARMED_STATE: AlarmControlPanelState.ARMED_AWAY,
-    CONTROL4_DISARMED_NOT_READY_STATE: AlarmControlPanelState.DISARMED,
-    CONTROL4_DISARMED_READY_STATE: AlarmControlPanelState.DISARMED,
-}
-
-# Map Control4 armed types to Home Assistant states
-CONTROL4_ARMED_TYPE_MAPPING = {
-    DEFAULT_ALARM_AWAY_MODE: AlarmControlPanelState.ARMED_AWAY,
-    DEFAULT_ALARM_HOME_MODE: AlarmControlPanelState.ARMED_HOME,
-    DEFAULT_ALARM_NIGHT_MODE: AlarmControlPanelState.ARMED_NIGHT,
-    DEFAULT_ALARM_CUSTOM_BYPASS_MODE: AlarmControlPanelState.ARMED_CUSTOM_BYPASS,
-    DEFAULT_ALARM_VACATION_MODE: AlarmControlPanelState.ARMED_VACATION,
-}
-
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities
@@ -126,19 +109,22 @@ async def async_setup_entry(
                     item_setup_info = json.loads(item_setup_info)
                     item_enabled = item_setup_info.get("setup", {}).get("enabled", True)
                 except (KeyError, json.JSONDecodeError):
-                    _LOGGER.debug("No setup info available for device %s, defaulting to enabled", item_name)
+                    _LOGGER.debug(
+                        "No setup info available for device %s, defaulting to enabled",
+                        item_name,
+                    )
                     item_enabled = True
 
                 for parent_item in items_of_category:
                     if parent_item["id"] == item_parent_id:
-                        item_manufacturer = parent_item.get("manufacturer", "")
-                        item_device_name = parent_item.get("name", "")
-                        item_model = parent_item.get("model", "")
+                        item_manufacturer = parent_item.get("manufacturer")
+                        item_device_name = parent_item.get("name")
+                        item_model = parent_item.get("model")
             else:
                 continue
         except KeyError as exception:
             _LOGGER.debug(
-                "Device properties from Control4: %s %s",
+                "Unknown device properties received from Control4: %s %s",
                 exception,
                 item,
             )
@@ -260,57 +246,77 @@ class Control4AlarmControlPanel(Control4Entity, AlarmControlPanelEntity):
             flags |= AlarmControlPanelEntityFeature.ARM_HOME
         if not self.entry_data[CONF_ALARM_NIGHT_MODE] == DEFAULT_ALARM_NIGHT_MODE:
             flags |= AlarmControlPanelEntityFeature.ARM_NIGHT
-        if not self.entry_data[CONF_ALARM_CUSTOM_BYPASS_MODE] == DEFAULT_ALARM_CUSTOM_BYPASS_MODE:
+        if (
+            not self.entry_data[CONF_ALARM_CUSTOM_BYPASS_MODE]
+            == DEFAULT_ALARM_CUSTOM_BYPASS_MODE
+        ):
             flags |= AlarmControlPanelEntityFeature.ARM_CUSTOM_BYPASS
         if not self.entry_data[CONF_ALARM_VACATION_MODE] == DEFAULT_ALARM_VACATION_MODE:
             flags |= AlarmControlPanelEntityFeature.ARM_VACATION
         return flags
 
     @property
-    def alarm_state(self) -> AlarmControlPanelState:
-        """Return the alarm state."""
-        if CONTROL4_PARTITION_STATE_VAR in self._extra_state_attributes:
-            state = self._extra_state_attributes[CONTROL4_PARTITION_STATE_VAR]
-            if state == CONTROL4_ARMED_STATE and CONTROL4_ARMED_TYPE_VAR in self._extra_state_attributes:
-                armed_type = self._extra_state_attributes[CONTROL4_ARMED_TYPE_VAR]
-                return CONTROL4_ARMED_TYPE_MAPPING.get(armed_type, AlarmControlPanelState.ARMED_AWAY)
-            if CONTROL4_ALARM_STATE_VAR in self._extra_state_attributes:
-                if self._extra_state_attributes[CONTROL4_ALARM_STATE_VAR]:
-                    return AlarmControlPanelState.TRIGGERED
-            return CONTROL4_STATE_MAPPING.get(state, AlarmControlPanelState.DISARMED)
-        return AlarmControlPanelState.DISARMED
+    def state(self):
+        """Return the state of the device."""
+        partition_state = self.extra_state_attributes[CONTROL4_PARTITION_STATE_VAR]
+        if partition_state == CONTROL4_EXIT_DELAY_STATE:
+            return AlarmControlPanelState.ARMING
+        if partition_state == CONTROL4_ENTRY_DELAY_STATE:
+            return AlarmControlPanelState.PENDING
+        if (
+            partition_state == CONTROL4_DISARMED_NOT_READY_STATE
+            or partition_state == CONTROL4_DISARMED_READY_STATE
+        ):
+            return AlarmControlPanelState.DISARMED
+        if partition_state == CONTROL4_ARMED_STATE:
+            armed_type = self.extra_state_attributes[CONTROL4_ARMED_TYPE_VAR]
+            if armed_type == self.entry_data[CONF_ALARM_AWAY_MODE]:
+                return AlarmControlPanelState.ARMED_AWAY
+            if armed_type == self.entry_data[CONF_ALARM_HOME_MODE]:
+                return AlarmControlPanelState.ARMED_HOME
+            if armed_type == self.entry_data[CONF_ALARM_NIGHT_MODE]:
+                return AlarmControlPanelState.ARMED_NIGHT
+            if armed_type == self.entry_data[CONF_ALARM_CUSTOM_BYPASS_MODE]:
+                return AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+            if armed_type == self.entry_data[CONF_ALARM_VACATION_MODE]:
+                return AlarmControlPanelState.ARMED_VACATION
+
+        alarm_state = self.extra_state_attributes[CONTROL4_ALARM_TYPE_VAR]
+        if alarm_state:
+            return AlarmControlPanelState.TRIGGERED
 
     async def async_alarm_arm_away(self, code=None):
         """Send arm away command."""
         c4_alarm = self.create_api_object()
-        await c4_alarm.armAway()
+        await c4_alarm.setArm(code, self.entry_data[CONF_ALARM_AWAY_MODE])
 
     async def async_alarm_arm_home(self, code=None):
         """Send arm home command."""
         c4_alarm = self.create_api_object()
-        await c4_alarm.armStay()
+        await c4_alarm.setArm(code, self.entry_data[CONF_ALARM_HOME_MODE])
 
     async def async_alarm_arm_night(self, code=None):
         """Send arm night command."""
         c4_alarm = self.create_api_object()
-        await c4_alarm.armNight()
+        await c4_alarm.setArm(code, self.entry_data[CONF_ALARM_NIGHT_MODE])
 
     async def async_alarm_arm_custom_bypass(self, code=None):
         """Send arm custom bypass command."""
         c4_alarm = self.create_api_object()
-        await c4_alarm.armCustomBypass()
+        await c4_alarm.setArm(code, self.entry_data[CONF_ALARM_CUSTOM_BYPASS_MODE])
 
     async def async_alarm_arm_vacation(self, code=None):
         """Send arm vacation command."""
         c4_alarm = self.create_api_object()
-        await c4_alarm.armVacation()
+        await c4_alarm.setArm(code, self.entry_data[CONF_ALARM_VACATION_MODE])
 
     async def async_alarm_disarm(self, code=None):
         """Send disarm command."""
         c4_alarm = self.create_api_object()
-        await c4_alarm.disarm()
+        await c4_alarm.setDisarm(code)
 
     async def send_alarm_keystrokes(self, keystrokes):
-        """Send keystrokes to the alarm panel."""
+        """Send custom keystrokes."""
         c4_alarm = self.create_api_object()
-        await c4_alarm.sendKeystrokes(keystrokes)
+        for key in keystrokes:
+            await c4_alarm.sendKeyPress(key)
