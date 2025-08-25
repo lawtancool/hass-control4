@@ -1,5 +1,7 @@
 """The Control4 integration."""
+
 from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -13,10 +15,6 @@ from pyControl4.error_handling import BadCredentials, InvalidCategory
 from pyControl4.websocket import C4Websocket
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-import ssl
-
-
 from homeassistant.const import (
     CONF_HOST,
     CONF_PASSWORD,
@@ -25,6 +23,7 @@ from homeassistant.const import (
     Platform,
     CONF_SCAN_INTERVAL,
 )
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client, device_registry as dr
 from homeassistant.helpers.entity import DeviceInfo, Entity
@@ -75,7 +74,6 @@ PLATFORMS = [
     Platform.FAN,
     Platform.CLIMATE,
 ]
-
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -246,10 +244,10 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
         _LOGGER.debug("First time setup, creating new C4Websocket object")
         connection_tracker = C4WebsocketConnectionTracker(hass, entry)
         websocket = C4Websocket(
-            ip=config[CONF_HOST],
-            session_no_verify_ssl=no_verify_ssl_session,
-            connect_callback=connection_tracker.connect_callback,
-            disconnect_callback=connection_tracker.disconnect_callback,
+            config[CONF_HOST],
+            no_verify_ssl_session,
+            connection_tracker.connect_callback,
+            connection_tracker.disconnect_callback,
         )
         entry_data[CONF_WEBSOCKET] = websocket
 
@@ -398,10 +396,10 @@ class Control4Entity(Entity):
         self._extra_state_attributes["parent item id"] = device_id
         # Disable polling
         self._attr_should_poll = False
+
     async def async_added_to_hass(self):
         """Add entity to hass. Register Websockets callbacks to receive entity state updates from Control4."""
         await super().async_added_to_hass()
-        
         await self.hass.async_add_executor_job(
             self.entry_data[CONF_WEBSOCKET].add_item_callback,
             self._idx,
@@ -412,6 +410,11 @@ class Control4Entity(Entity):
             self.entry_data[CONF_WEBSOCKET].add_item_callback,
             self._device_id,
             self._update_callback,
+        )
+        _LOGGER.debug(
+            "Registering parent device %s of item id %s for callback",
+            self._device_id,
+            self._idx,
         )
         return True
 
@@ -440,7 +443,7 @@ class Control4Entity(Entity):
             self._attr_available = True
             data = message["data"]
             await self._data_to_extra_state_attributes(data)
-        _LOGGER.debug("x Message for device %s", device)
+        _LOGGER.debug("Message for device %s", device)
         self.async_write_ha_state()
 
     async def _data_to_extra_state_attributes(self, data) -> None:
