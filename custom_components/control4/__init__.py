@@ -69,8 +69,8 @@ PLATFORMS = [
     Platform.BINARY_SENSOR,
     Platform.LOCK,
     Platform.MEDIA_PLAYER,
+    Platform.SENSOR,
 ]
-
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Control4 from a config entry."""
@@ -418,13 +418,14 @@ class Control4Entity(Entity):
         """Entity being removed from hass. Unregister Control4 Websockets callbacks for this entity."""
         try:
             _LOGGER.debug("Deregistering callback for item id %s", self._idx)
-            self.entry_data[CONF_WEBSOCKET].remove_item_callback(self._idx)
+            # Pass specific callback for selective removal
+            self.entry_data[CONF_WEBSOCKET].remove_item_callback(self._idx, self._update_callback)
             _LOGGER.debug(
                 "Deregistering callback for parent device %s of item id %s",
                 self._device_id,
                 self._idx,
             )
-            self.entry_data[CONF_WEBSOCKET].remove_item_callback(self._device_id)
+            self.entry_data[CONF_WEBSOCKET].remove_item_callback(self._device_id, self._update_callback)
         except KeyError:
             return
 
