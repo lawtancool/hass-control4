@@ -1,6 +1,6 @@
 # hass-control4
 
-This custom integration for Home Assistant allows control of Control4 lights, locks (only locks that are relay-based in Control4), alarm control panels, door/window/motion sensors (as binary sensors), thermostats, and relay devices (as switches).
+This custom integration for Home Assistant allows control of Control4 lights, locks (only locks that are relay-based in Control4), alarm control panels, door/window/motion sensors (as binary sensors), thermostats, fans, and relay devices (as switches).
 
 ## Installation
 
