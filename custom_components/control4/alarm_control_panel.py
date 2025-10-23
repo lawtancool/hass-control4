@@ -256,7 +256,7 @@ class Control4AlarmControlPanel(Control4Entity, AlarmControlPanelEntity):
         return flags
 
     @property
-    def state(self):
+    def alarm_state(self) -> AlarmControlPanelState | None:
         """Return the state of the device."""
         partition_state = self.extra_state_attributes[CONTROL4_PARTITION_STATE_VAR]
         if partition_state == CONTROL4_EXIT_DELAY_STATE:
@@ -284,6 +284,8 @@ class Control4AlarmControlPanel(Control4Entity, AlarmControlPanelEntity):
         alarm_state = self.extra_state_attributes[CONTROL4_ALARM_TYPE_VAR]
         if alarm_state:
             return AlarmControlPanelState.TRIGGERED
+
+        return None
 
     async def async_alarm_arm_away(self, code=None):
         """Send arm away command."""
