@@ -1,4 +1,5 @@
 """The Control4 integration."""
+
 from __future__ import annotations
 
 import asyncio
@@ -69,6 +70,9 @@ PLATFORMS = [
     Platform.BINARY_SENSOR,
     Platform.LOCK,
     Platform.MEDIA_PLAYER,
+    Platform.SWITCH,
+    Platform.FAN,
+    Platform.CLIMATE,
 ]
 
 
