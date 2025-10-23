@@ -31,6 +31,7 @@ CONTROL4_RELAY_PROXY_TYPES = {
     "relaysingle_relay_c4",
     "relaysingle_doorlock_c4",
     "cardaccess_wirelessrelay",
+    "relaysingle_electronicgate_c4"
 }
 
 CONTROL4_PROXY_MAPPING = {

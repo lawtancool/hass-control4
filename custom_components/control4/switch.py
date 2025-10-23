@@ -17,10 +17,11 @@ from .director_utils import director_get_entry_variables
 
 _LOGGER = logging.getLogger(__name__)
 
-# Control4 proxy types for different relay devices
+# Control4 proxy types for different relay devices, excluding locks
 CONTROL4_RELAY_PROXY_TYPES = {
     "relaysingle_relay_c4": "Basic Relay",  # Generic relay that can be used for various purposes
     "cardaccess_wirelessrelay": "Wireless Relay",
+    "relaysingle_electronicgate_c4": "Electronic Gate Relay",
 }
 
 
