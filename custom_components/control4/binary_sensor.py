@@ -10,6 +10,7 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.event import async_call_later
 
 from . import Control4Entity, get_items_of_category
 from .const import CONF_DIRECTOR, CONF_DIRECTOR_ALL_ITEMS, CONTROL4_ENTITY_TYPE, DOMAIN
@@ -25,6 +26,8 @@ CONTROL4_DOOR_PROXY = "contactsingle_doorcontactsensor_c4"
 CONTROL4_WINDOW_PROXY = "contactsingle_windowcontactsensor_c4"
 CONTROL4_MOTION_PROXY = "contactsingle_motionsensor_c4"
 CONTROL4_GARAGE_DOOR_PROXY = "relaycontact_garagedoor_c4"
+PROXY_DYNALITE_TRIGGER = "dynalite_trigger"
+LUA_CONTROL = "lua_gen"
 
 # List of proxy types that should be handled as switches instead of binary sensors
 CONTROL4_RELAY_PROXY_TYPES = {
@@ -63,6 +66,18 @@ async def async_setup_entry(
     
     items_of_category.extend(garage_door_sensors)
 
+    # Add Lua-based trigger devices (e.g., dynalite_trigger) as momentary binary sensors
+    existing_ids = {item["id"] for item in items_of_category}
+    lua_trigger_sensors = [
+        item for item in director_all_items
+        if item.get("id") not in existing_ids and (
+            item.get("proxy") == PROXY_DYNALITE_TRIGGER
+            or item.get("control") == LUA_CONTROL
+            or item.get("protocolControl") == LUA_CONTROL
+        )
+    ]
+    items_of_category.extend(lua_trigger_sensors)
+
     entity_list = []
     seen_ids = set()  # Track unique IDs to prevent duplicates
 
@@ -95,6 +110,13 @@ async def async_setup_entry(
                 item_manufacturer = None
                 item_device_name = None
                 item_model = None
+                # Build event id -> name mapping if available (for Lua triggers)
+                events_list = item.get("events") or []
+                event_name_by_id = {
+                    int(e.get("id")): str(e.get("name"))
+                    for e in events_list
+                    if isinstance(e, dict) and "id" in e and "name" in e
+                }
 
                 item_device_class = BinarySensorDeviceClass.OPENING
                 for proxy_type in [
@@ -134,24 +156,44 @@ async def async_setup_entry(
         item_attributes = await director_get_entry_variables(hass, entry, item_id)
         _LOGGER.debug("Device attributes for %s: %s", item_name, item_attributes)
 
-        entity_list.append(
-            Control4BinarySensor(
-                entry_data,
-                entry,
-                item_name,
-                item_id,
-                item_device_name,
-                item_manufacturer,
-                item_model,
-                item_parent_id,
-                item_area,
-                item_attributes,
-                item_device_class,
-                item_alarm_zone_id,
-                item_proxy,
-                unique_id,
+        # Create Lua trigger binary sensor as momentary event sensor
+        if item_proxy == PROXY_DYNALITE_TRIGGER or item.get("control") == LUA_CONTROL or item.get("protocolControl") == LUA_CONTROL:
+            entity_list.append(
+                Control4LuaTriggerBinarySensor(
+                    entry_data,
+                    entry,
+                    item_name,
+                    item_id,
+                    item_device_name,
+                    item_manufacturer,
+                    item_model,
+                    item_parent_id,
+                    item_area,
+                    item_attributes,
+                    item_proxy,
+                    unique_id,
+                    event_name_by_id,
+                )
             )
-        )
+        else:
+            entity_list.append(
+                Control4BinarySensor(
+                    entry_data,
+                    entry,
+                    item_name,
+                    item_id,
+                    item_device_name,
+                    item_manufacturer,
+                    item_model,
+                    item_parent_id,
+                    item_area,
+                    item_attributes,
+                    item_device_class,
+                    item_alarm_zone_id,
+                    item_proxy,
+                    unique_id,
+                )
+            )
 
     async_add_entities(entity_list, True)
 
@@ -279,3 +321,119 @@ class Control4BinarySensor(Control4Entity, BinarySensorEntity):
         # Rather, they are attached to a room id.
         # Therefore, there is no device info for Home Assistant to use.
         return None
+
+
+class Control4LuaTriggerBinarySensor(Control4Entity, BinarySensorEntity):
+    """Binary sensor for Lua-based trigger devices (momentary on when a trigger fires)."""
+
+    def __init__(
+        self,
+        entry_data: dict,
+        entry: ConfigEntry,
+        name: str,
+        idx: int,
+        device_name: str | None,
+        device_manufacturer: str | None,
+        device_model: str | None,
+        device_id: int,
+        device_area: str,
+        device_attributes: dict,
+        proxy_type: str,
+        unique_id: str,
+        event_name_by_id: dict[int, str],
+    ) -> None:
+        super().__init__(
+            entry_data,
+            entry,
+            name,
+            idx,
+            device_name,
+            device_manufacturer,
+            device_model,
+            device_id,
+            device_area,
+            device_attributes,
+        )
+        self._proxy_type = proxy_type
+        self._attr_unique_id = unique_id
+        self._attr_is_on = False
+        self._turn_off_unsub = None
+        self._event_name_by_id = event_name_by_id or {}
+        # Attributes to expose last trigger info
+        self._extra_state_attributes["last_preset_id"] = None
+        self._extra_state_attributes["last_preset_name"] = None
+
+    def _schedule_turn_off(self, delay: float = 1.0) -> None:
+        """Schedule the binary sensor to turn off after delay seconds."""
+        if self._turn_off_unsub:
+            self._turn_off_unsub()  # cancel previous
+            self._turn_off_unsub = None
+
+        def _cb(_now):
+            self._attr_is_on = False
+            self.async_write_ha_state()
+
+        self._turn_off_unsub = async_call_later(self.hass, delay, _cb)
+
+    def _extract_event_info(self, payload: dict) -> tuple[int | None, str | None]:
+        """Extract numeric preset/event id and friendly name from payload or mapping."""
+        def _first(keys):
+            for k in keys:
+                if k in payload:
+                    return payload[k]
+                ku = k.upper()
+                if ku in payload:
+                    return payload[ku]
+            return None
+
+        possible_id = _first(("preset_id", "event_id", "preset", "event"))
+        name_from_payload = _first(("preset_name", "event_name", "name"))
+        numeric_id: int | None = None
+        if possible_id is not None:
+            try:
+                numeric_id = int(possible_id)
+            except (ValueError, TypeError):
+                numeric_id = None
+        friendly = None
+        if isinstance(name_from_payload, str) and name_from_payload.strip():
+            friendly = name_from_payload.strip()
+        elif numeric_id is not None and numeric_id in self._event_name_by_id:
+            friendly = self._event_name_by_id[numeric_id]
+        elif numeric_id is not None:
+            friendly = f"Preset {numeric_id}"
+        return numeric_id, friendly
+
+    async def _update_callback(self, device, message):
+        """Update state on trigger events."""
+        if message is False:
+            self._attr_available = False
+        elif message.get("evtName") == "OnDataToUI":
+            self._attr_available = True
+            data = message.get("data", {})
+            payload: dict = {}
+            if "devicecommand" in data:
+                dc = data["devicecommand"]
+                if isinstance(dc, dict):
+                    payload = dc.get("params", dc) or {}
+            elif isinstance(data, dict):
+                payload = data
+
+            if isinstance(payload, dict) and payload:
+                # Merge attributes and set last event info
+                await self._data_to_extra_state_attributes(payload)
+                preset_id, preset_name = self._extract_event_info(payload)
+                if preset_id is not None:
+                    self._extra_state_attributes["last_preset_id"] = preset_id
+                if preset_name is not None:
+                    self._extra_state_attributes["last_preset_name"] = preset_name
+
+                # Pulse on
+                self._attr_is_on = True
+                self._schedule_turn_off()
+
+        self.async_write_ha_state()
+
+    @property
+    def is_on(self):
+        """Return whether the sensor is on (recent trigger)."""
+        return self._attr_is_on
