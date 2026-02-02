@@ -55,6 +55,13 @@ async def async_setup_entry(
             item_manufacturer = parent.get("manufacturer") if parent else None
             item_device_name = parent.get("name") if parent else None
             item_model = parent.get("model") if parent else None
+            # Build event id -> name mapping if available
+            events_list = item.get("events") or []
+            event_name_by_id = {
+                int(e.get("id")): str(e.get("name"))
+                for e in events_list
+                if isinstance(e, dict) and "id" in e and "name" in e
+            }
         except KeyError:
             _LOGGER.exception(
                 "Unknown device properties received from Control4: %s",
@@ -77,6 +84,7 @@ async def async_setup_entry(
                 device_area=item_area,
                 device_attributes=attributes,
                 proxy=item.get("proxy"),
+                event_name_by_id=event_name_by_id,
             )
         )
 
@@ -108,6 +116,7 @@ class Control4LuaSensor(Control4Entity, SensorEntity):
         device_area: str,
         device_attributes: dict,
         proxy: str | None,
+        event_name_by_id: dict[int, str] | None = None,
     ) -> None:
         super().__init__(
             entry_data,
@@ -123,20 +132,51 @@ class Control4LuaSensor(Control4Entity, SensorEntity):
         )
         self._proxy = proxy or ""
         self._attr_available = True
+        self._event_name_by_id: dict[int, str] = event_name_by_id or {}
         # Attempt to initialize native value from known fields if present
         self._derive_native_value_from_attributes()
 
     def _derive_native_value_from_attributes(self) -> None:
         """Derive native value from existing attributes."""
         # Heuristics: prefer explicit numeric fields that look like event/preset ids
-        for key in ("preset", "event", "event_id", "preset_id", "Preset", "Event"):
-            if key in self._extra_state_attributes:
-                try:
-                    self._attr_native_value = int(self._extra_state_attributes[key])
-                except (ValueError, TypeError):
-                    self._attr_native_value = self._extra_state_attributes[key]
-                return
-        self._attr_native_value = None
+        def _get_attr(keys: tuple[str, ...]) -> Any:
+            for k in keys:
+                if k in self._extra_state_attributes:
+                    return self._extra_state_attributes[k]
+                # Also check uppercase variant because base class uppercases keys
+                ku = k.upper()
+                if ku in self._extra_state_attributes:
+                    return self._extra_state_attributes[ku]
+            return None
+
+        possible_id = _get_attr(("preset_id", "event_id", "preset", "event"))
+        name_from_payload = _get_attr(("preset_name", "event_name", "name"))
+
+        numeric_id: int | None = None
+        if possible_id is not None:
+            try:
+                numeric_id = int(possible_id)
+            except (ValueError, TypeError):
+                numeric_id = None
+
+        # Set native value to numeric id when available; else fallback to event/preset text
+        if numeric_id is not None:
+            self._attr_native_value = numeric_id
+            # Expose normalized attributes for clarity
+            self._extra_state_attributes["preset_id"] = numeric_id
+            # Derive friendly name: payload name > mapping > generic
+            friendly = None
+            if isinstance(name_from_payload, str) and name_from_payload.strip():
+                friendly = name_from_payload.strip()
+            elif numeric_id in self._event_name_by_id:
+                friendly = self._event_name_by_id[numeric_id]
+            else:
+                friendly = f"Preset {numeric_id}"
+            self._extra_state_attributes["preset_name"] = friendly
+        else:
+            # Fallback: try to use textual event value
+            text_val = _get_attr(("event", "preset"))
+            self._attr_native_value = text_val if isinstance(text_val, (str, int)) else None
 
     async def _update_callback(self, device, message):
         """Update state attributes in hass after receiving a Websocket update."""
