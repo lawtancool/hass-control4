@@ -16,6 +16,7 @@ from pyControl4.websocket import C4Websocket
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
+    ATTR_ENTITY_ID,
     CONF_HOST,
     CONF_PASSWORD,
     CONF_TOKEN,
@@ -24,15 +25,14 @@ from homeassistant.const import (
     CONF_SCAN_INTERVAL,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers import aiohttp_client, device_registry as dr
+from homeassistant.core import ServiceCall, ServiceResponse, SupportsResponse
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady, ServiceValidationError
+from homeassistant.helpers import aiohttp_client, config_validation as cv, device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.event import async_call_later
-from homeassistant.helpers.update_coordinator import (
-    CoordinatorEntity,
-    DataUpdateCoordinator,
-)
+from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
+import voluptuous as vol
 
 from .const import (
     CONF_ACCOUNT,
@@ -59,6 +59,10 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     RETRY_BACKOFF_MAX_SEC,
+    SERVICE_FIELD_COMMAND,
+    SERVICE_FIELD_ITEM_ID,
+    SERVICE_FIELD_PARAMS,
+    SERVICE_SEND_COMMAND,
     SCHEDULE_REFRESH_ADVANCE_SEC,
 )
 from .director_utils import director_get_entry_variables
@@ -77,6 +81,24 @@ PLATFORMS = [
     Platform.CLIMATE,
     Platform.COVER,
 ]
+
+SERVICE_SEND_COMMAND_SCHEMA = vol.Schema(
+    {
+        vol.Required(SERVICE_FIELD_COMMAND): vol.All(
+            cv.string, lambda value: value.strip(), vol.Length(min=1)
+        ),
+        vol.Optional(SERVICE_FIELD_PARAMS, default={}): dict,
+        vol.Optional(ATTR_ENTITY_ID): vol.All(
+            vol.Any(cv.entity_id, [cv.entity_id]),
+            lambda value: [value] if isinstance(value, str) else value,
+        ),
+        vol.Optional(SERVICE_FIELD_ITEM_ID): vol.All(
+            vol.Any(vol.Coerce(int), [vol.Coerce(int)]),
+            lambda value: [value] if isinstance(value, int) else value,
+        ),
+    },
+    extra=vol.ALLOW_EXTRA,
+)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Control4 from a config entry."""
@@ -158,6 +180,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entry_data[CONF_CONFIG_LISTENER] = entry.add_update_listener(update_listener)
 
+    if not hass.services.has_service(DOMAIN, SERVICE_SEND_COMMAND):
+        async def async_send_command_service(
+            call: ServiceCall,
+        ) -> ServiceResponse:
+            return await _async_handle_send_command(hass, call)
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_SEND_COMMAND,
+            async_send_command_service,
+            schema=SERVICE_SEND_COMMAND_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
@@ -175,9 +211,75 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
+        if (
+            not hass.data[DOMAIN]
+            and hass.services.has_service(DOMAIN, SERVICE_SEND_COMMAND)
+        ):
+            hass.services.async_remove(DOMAIN, SERVICE_SEND_COMMAND)
         _LOGGER.debug("Unloaded entry for %s", entry.entry_id)
 
     return unload_ok
+
+
+def _get_director(hass: HomeAssistant, config_entry_id: str | None = None) -> C4Director:
+    """Get a Control4 director, auto-resolving when only one exists."""
+    domain_data = hass.data.get(DOMAIN, {})
+    if config_entry_id:
+        entry_data = domain_data.get(config_entry_id, {})
+    elif len(domain_data) == 1:
+        entry_data = next(iter(domain_data.values()))
+    else:
+        raise ServiceValidationError(
+            "No Control4 entries loaded" if not domain_data
+            else "Multiple Control4 entries; use entity_id targeting"
+        )
+    director = entry_data.get(CONF_DIRECTOR)
+    if director is None:
+        raise ServiceValidationError("Control4 director is unavailable")
+    return director
+
+
+def _resolve_entity_target(hass: HomeAssistant, entity_id: str) -> tuple[C4Director, int]:
+    """Resolve entity_id to (director, item_id)."""
+    entity_entry = er.async_get(hass).async_get(entity_id)
+    if entity_entry is None or not entity_entry.config_entry_id:
+        raise ServiceValidationError(f"{entity_id}: not a Control4 entity")
+
+    state = hass.states.get(entity_id)
+    if state is None:
+        raise ServiceValidationError(f"{entity_id}: state unavailable")
+
+    try:
+        item_id = int(state.attributes["item id"])
+    except (KeyError, TypeError, ValueError):
+        raise ServiceValidationError(f"{entity_id}: missing or invalid item id") from None
+
+    return _get_director(hass, entity_entry.config_entry_id), item_id
+
+
+async def _async_handle_send_command(
+    hass: HomeAssistant, call: ServiceCall
+) -> ServiceResponse:
+    command = call.data[SERVICE_FIELD_COMMAND]
+
+    params = call.data.get(SERVICE_FIELD_PARAMS, {})
+    entity_ids = call.data.get(ATTR_ENTITY_ID, [])
+    item_ids = call.data.get(SERVICE_FIELD_ITEM_ID, [])
+
+    if entity_ids:
+        targets = [_resolve_entity_target(hass, eid) for eid in entity_ids]
+    elif item_ids:
+        director = _get_director(hass)
+        targets = [(director, iid) for iid in item_ids]
+    else:
+        raise ServiceValidationError("One of entity_id or item_id must be provided")
+
+    for director, item_id in targets:
+        await director.send_command(item_id, command, params)
+
+    if call.return_response:
+        return {"sent_count": len(targets)}
+    return None
 
 
 async def update_listener(hass, config_entry):
