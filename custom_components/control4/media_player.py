@@ -43,6 +43,7 @@ CONTROL4_CURRENT_VIDEO_DEVICE = "CURRENT_VIDEO_DEVICE"
 CONTROL4_PLAYING = "PLAYING"
 CONTROL4_PAUSED = "PAUSED"
 CONTROL4_STOPPED = "STOPPED"
+CONTROL4_SOURCE_STATE = "State"
 CONTROL4_MEDIA_INFO = "CURRENT MEDIA INFO"
 
 CONTROL4_PARENT_ID = "parentId"
@@ -56,6 +57,7 @@ VARIABLES_OF_INTEREST = {
     CONTROL4_PLAYING,
     CONTROL4_PAUSED,
     CONTROL4_STOPPED,
+    CONTROL4_SOURCE_STATE,
 }
 
 CONTROL4_MEDIA_JOIN_EVENT = "control4_media_join"
@@ -227,6 +229,8 @@ class Control4Room(Control4CoordinatorEntity, MediaPlayerEntity):  # type: ignor
             MediaPlayerEntityFeature.PLAY
             | MediaPlayerEntityFeature.PAUSE
             | MediaPlayerEntityFeature.STOP
+            | MediaPlayerEntityFeature.NEXT_TRACK
+            | MediaPlayerEntityFeature.PREVIOUS_TRACK
             | MediaPlayerEntityFeature.VOLUME_MUTE
             | MediaPlayerEntityFeature.VOLUME_SET
             | MediaPlayerEntityFeature.VOLUME_STEP
@@ -307,6 +311,15 @@ class Control4Room(Control4CoordinatorEntity, MediaPlayerEntity):  # type: ignor
                     return MediaPlayerState.PAUSED
                 if current_data.get(CONTROL4_STOPPED, None):
                     return MediaPlayerState.ON
+                state = current_data.get(CONTROL4_SOURCE_STATE, None)
+                if isinstance(state, str):
+                    normalized_state = state.lower()
+                    if normalized_state == "playing":
+                        return MediaPlayerState.PLAYING
+                    if normalized_state == "paused":
+                        return MediaPlayerState.PAUSED
+                    if normalized_state == "stopped":
+                        return MediaPlayerState.ON
             current_source = self._id_to_parent.get(current_source, None)
         return None
 
@@ -507,4 +520,12 @@ class Control4Room(Control4CoordinatorEntity, MediaPlayerEntity):  # type: ignor
     async def async_media_stop(self):
         """Issue a stop command."""
         await self._create_api_object().set_stop()
+        await self.coordinator.async_request_refresh()
+
+    async def async_media_next_track(self):
+        await self._create_api_object().set_next()
+        await self.coordinator.async_request_refresh()
+
+    async def async_media_previous_track(self):
+        await self._create_api_object().set_previous()
         await self.coordinator.async_request_refresh()
