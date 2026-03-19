@@ -1,4 +1,30 @@
 {
+  "config_flow": {
+    "options": {
+      "step": {
+        "configure": {
+          "title": "Control4 options",
+          "description": "Scan interval, alarm modes, and optional Dynalite TCP gateway.",
+          "data": {
+            "scan_interval": "Seconds between updates (media player only)",
+            "alarm_home_mode": "Alarm arm home mode name",
+            "alarm_away_mode": "Alarm arm away mode name",
+            "alarm_night_mode": "Alarm arm night mode name",
+            "alarm_custom_bypass_mode": "Alarm arm custom bypass mode name",
+            "alarm_vacation_mode": "Alarm arm vacation mode name",
+            "dynalite_enabled": "Enable Dynalite gateway listener (TCP)"
+          }
+        },
+        "configure_dynalite_tcp": {
+          "data": {
+            "dynalite_host": "Dynalite gateway IP",
+            "dynalite_port": "Dynalite gateway port",
+            "dynalite_parse_layout": "TCP frame layout"
+          }
+        }
+      }
+    }
+  },
   "config": {
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
@@ -31,13 +57,31 @@
   "options": {
     "step": {
       "init": {
+        "title": "Control4 settings",
+        "description": "{heading}",
+        "data": {
+          "Settings": "What do you want to do?"
+        }
+      },
+      "configure": {
+        "title": "Configure options",
+        "description": "Scan interval, alarm modes, and optional Dynalite TCP gateway.",
         "data": {
           "scan_interval": "Seconds between updates (media player only)",
           "alarm_home_mode": "Alarm arm home mode name",
           "alarm_away_mode": "Alarm arm away mode name",
           "alarm_night_mode": "Alarm arm night mode name",
           "alarm_custom_bypass_mode": "Alarm arm custom bypass mode name",
-          "alarm_vacation_mode": "Alarm arm vacation mode name"
+          "alarm_vacation_mode": "Alarm arm vacation mode name",
+          "dynalite_enabled": "Enable Dynalite gateway listener (TCP)"
+        }
+      },
+      "configure_dynalite_tcp": {
+        "title": "Dynalite TCP connection",
+        "data": {
+          "dynalite_host": "Dynalite gateway IP",
+          "dynalite_port": "Dynalite gateway port",
+          "dynalite_parse_layout": "TCP frame layout"
         }
       }
     }

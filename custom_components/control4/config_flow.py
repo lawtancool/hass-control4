@@ -1,7 +1,13 @@
 """Config flow for Control4 integration."""
-from asyncio import TimeoutError as asyncioTimeoutError
-import logging
+from __future__ import annotations
 
+import asyncio
+import json
+import logging
+from asyncio import TimeoutError as asyncioTimeoutError
+from typing import Any
+
+from aiohttp import web
 from aiohttp.client_exceptions import ClientError
 from pyControl4.account import C4Account
 from pyControl4.director import C4Director
@@ -9,15 +15,22 @@ from pyControl4.error_handling import NotFound, Unauthorized
 import voluptuous as vol
 
 from homeassistant import config_entries, exceptions
+from homeassistant.components.http import HomeAssistantView
 from homeassistant.const import (
     CONF_HOST,
     CONF_PASSWORD,
     CONF_USERNAME,
     CONF_SCAN_INTERVAL,
 )
-from homeassistant.core import callback
-from homeassistant.helpers import aiohttp_client, config_validation as cv
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import (
+    aiohttp_client,
+    config_validation as cv,
+    device_registry as dr,
+    entity_registry as er,
+)
 from homeassistant.helpers.device_registry import format_mac
+from homeassistant.helpers.network import get_url
 
 from .const import (
     CONF_ALARM_ARM_STATES,
@@ -27,17 +40,162 @@ from .const import (
     CONF_ALARM_NIGHT_MODE,
     CONF_ALARM_VACATION_MODE,
     CONF_CONTROLLER_UNIQUE_ID,
+    CONF_DIRECTOR_ALL_ITEMS,
+    CONF_DYNALITE_ENABLED,
+    CONF_DYNALITE_HOST,
+    CONF_DYNALITE_PARSE_LAYOUT,
+    CONF_DYNALITE_PORT,
+    DEFAULT_DYNALITE_PARSE_LAYOUT,
+    DYNALITE_PARSE_LAYOUT_BYTES_2_3,
+    DYNALITE_PARSE_LAYOUT_DYNET,
+    CONTROL4_ENTITY_TYPE,
     DEFAULT_ALARM_AWAY_MODE,
     DEFAULT_ALARM_CUSTOM_BYPASS_MODE,
     DEFAULT_ALARM_HOME_MODE,
     DEFAULT_ALARM_NIGHT_MODE,
     DEFAULT_ALARM_VACATION_MODE,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_DYNALITE_PORT,
     DOMAIN,
     MIN_SCAN_INTERVAL,
 )
+from .director_utils import (
+    director_get_entry_variables,
+    director_get_item_properties,
+    director_has_dynalite_triggers,
+)
 
 _LOGGER = logging.getLogger(__name__)
+
+
+async def build_control4_export_payload(
+    hass: HomeAssistant, entry_id: str
+) -> dict[str, Any] | None:
+    """Build export payload (meta + items with variables) for the given config entry."""
+    entry_data = (hass.data.get(DOMAIN) or {}).get(entry_id)
+    if not entry_data:
+        return None
+    data = entry_data.get(CONF_DIRECTOR_ALL_ITEMS)
+    if not data:
+        return None
+    entry = next(
+        (e for e in hass.config_entries.async_entries(DOMAIN) if e.entry_id == entry_id),
+        None,
+    )
+    if not entry:
+        return None
+
+    export_list = [dict(item) for item in data]
+    device_indices = [
+        i
+        for i, item in enumerate(export_list)
+        if item.get("type") == CONTROL4_ENTITY_TYPE and item.get("id")
+    ]
+
+    async def fetch_vars(index: int) -> tuple[int, dict[str, Any]]:
+        item = export_list[index]
+        item_id = item["id"]
+        try:
+            variables = await director_get_entry_variables(hass, entry, item_id)
+            return (index, variables)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Export: failed to get variables for item %s: %s", item_id, err)
+            return (index, {"_error": str(err)})
+
+    batch_size = 20
+    for start in range(0, len(device_indices), batch_size):
+        batch = device_indices[start : start + batch_size]
+        results = await asyncio.gather(*(fetch_vars(i) for i in batch))
+        for index, variables in results:
+            export_list[index]["variables"] = variables
+
+    # Items that should get Director properties (e.g. area/channel for Dynalite)
+    def item_wants_properties(item: dict[str, Any]) -> bool:
+        if item.get("proxy") == "dynalite_trigger":
+            return True
+        links = item.get("links") or []
+        return any(
+            "/properties" in (link.get("href") or "")
+            for link in links
+            if isinstance(link, dict)
+        )
+
+    properties_indices = [
+        i
+        for i, item in enumerate(export_list)
+        if item.get("id") is not None and item_wants_properties(item)
+    ]
+
+    async def fetch_props(index: int) -> tuple[int, dict[str, Any] | None]:
+        item = export_list[index]
+        item_id = item["id"]
+        props = await director_get_item_properties(hass, entry, item_id)
+        return (index, props)
+
+    for start in range(0, len(properties_indices), batch_size):
+        batch = properties_indices[start : start + batch_size]
+        results = await asyncio.gather(*(fetch_props(i) for i in batch))
+        for index, props in results:
+            export_list[index]["properties"] = props
+
+    dev_reg = dr.async_get(hass)
+    ha_device_count = sum(
+        1 for d in dev_reg.devices.values() if entry.entry_id in d.config_entries
+    )
+    entity_reg = er.async_get(hass)
+    ha_entities: dict[str, int] = {}
+    for entity in entity_reg.entities.values():
+        if entity.config_entry_id != entry.entry_id:
+            continue
+        platform = entity.platform or "unknown"
+        ha_entities[platform] = ha_entities.get(platform, 0) + 1
+
+    return {
+        "meta": {"ha_device_count": ha_device_count, "ha_entities": ha_entities},
+        "items": export_list,
+    }
+
+
+class Control4ExportView(HomeAssistantView):
+    """HTTP view to serve director_all_items as JSON for browser download (Save As)."""
+
+    requires_auth = False
+    url = "/api/control4/export"
+    name = "api:control4:export"
+
+    async def get(self, request: web.Request) -> web.Response:
+        """Serve pretty-printed JSON; uses build_control4_export_payload on demand."""
+        hass = request.app["hass"]
+        entry_id = request.query.get("entry_id")
+        if not entry_id:
+            return web.Response(
+                status=400,
+                text="entry_id query parameter required",
+                content_type="text/plain",
+            )
+        payload = await build_control4_export_payload(hass, entry_id)
+        if not payload:
+            # 503 so the link is valid but data wasn't ready (e.g. integration still loading)
+            msg = (
+                "Entry not found or export data not available. "
+                "If you just reloaded, wait for the Control4 integration to finish loading and try again."
+            )
+            _LOGGER.warning("Export failed for entry_id=%s: %s", entry_id, msg)
+            return web.Response(
+                status=503,
+                text=msg,
+                content_type="text/plain",
+            )
+        try:
+            body = json.dumps(payload, indent=2, ensure_ascii=False, default=str)
+        except (TypeError, ValueError) as err:
+            _LOGGER.exception("Export serialize error: %s", err)
+            return web.Response(status=500, text=f"Serialize error: {err}")
+        return web.Response(
+            body=body,
+            content_type="application/json",
+            headers={"Content-Disposition": 'attachment; filename="control4_export.json"'},
+        )
 
 DATA_SCHEMA = vol.Schema(
     {
@@ -200,11 +358,93 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         # Do not assign to self.config_entry; it's a read-only property in HA.
         self._config_entry = config_entry
 
+    def _entry_data_ready(self):
+        """Return True if integration entry data is loaded (e.g. JSON download)."""
+        entry_data = self.hass.data.get(DOMAIN, {}).get(self._config_entry.entry_id)
+        return bool(entry_data and entry_data.get(CONF_DIRECTOR_ALL_ITEMS))
+
+    async def _notify_and_close(self, title: str, message: str, notification_id: str):
+        """Send a persistent notification and close the options flow."""
+        await self.hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": title,
+                "message": message,
+                "notification_id": notification_id,
+            },
+        )
+        return self.async_create_entry(title="", data=self._config_entry.options)
+
+    async def _handle_download(self):
+        """Notify with a link that triggers browser Save As when opened."""
+        base = get_url(self.hass)
+        path = f"/api/control4/export?entry_id={self._config_entry.entry_id}"
+        if base:
+            url = base.rstrip("/") + path
+            msg = f"Open this link in your browser to download the JSON file (Save As):\n\n{url}"
+        else:
+            msg = (
+                "Could not determine HA URL. Set it in Settings → Home Assistant URL (Local Network), "
+                f"or open this path in your browser (prepend your HA address):\n\n{path}"
+            )
+        return await self._notify_and_close(
+            "Control4 download JSON",
+            msg,
+            "control4_download_json",
+        )
+
     async def async_step_init(self, user_input=None):
-        """Handle options flow."""
+        """Handle options flow: menu to choose configure or show table."""
+        if user_input is not None:
+            if user_input.get("Settings") == "download":
+                if not self._entry_data_ready():
+                    return await self._notify_and_close(
+                        "Control4 download JSON",
+                        "Integration data is not ready. Please try again after the integration has finished loading.",
+                        "control4_download_json",
+                    )
+                return await self._handle_download()
+            return await self.async_step_configure()
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("Settings", default="configure"): vol.In(
+                        {
+                            "configure": "Configure options (scan interval, alarm, Dynalite)",
+                            "download": "Download JSON file",
+                        }
+                    ),
+                }
+            ),
+            description_placeholders={"heading": "Control4 settings"},
+        )
+
+    async def async_step_configure(self, user_input=None):
+        """Handle the configure-options form (scan interval, alarm modes, Dynalite TCP)."""
         if user_input is not None:
             _LOGGER.debug(user_input)
-            return self.async_create_entry(title="", data=user_input)
+            entry_data_submit = (
+                (self.hass.data.get(DOMAIN) or {}).get(self._config_entry.entry_id)
+                or {}
+            )
+            has_dynalite = director_has_dynalite_triggers(entry_data_submit)
+            enabled = bool(user_input.get(CONF_DYNALITE_ENABLED, False)) and has_dynalite
+            if not enabled:
+                data = {
+                    **user_input,
+                    CONF_DYNALITE_ENABLED: False,
+                    CONF_DYNALITE_HOST: "",
+                    CONF_DYNALITE_PORT: DEFAULT_DYNALITE_PORT,
+                    CONF_DYNALITE_PARSE_LAYOUT: self._config_entry.options.get(
+                        CONF_DYNALITE_PARSE_LAYOUT, DEFAULT_DYNALITE_PARSE_LAYOUT
+                    ),
+                }
+                return self.async_create_entry(title="", data=data)
+            self._configure_base = user_input
+            return await self.async_step_configure_dynalite_tcp()
 
         # TODO: figure out how to accept empty strings to disable modes
         # TODO: figure out how to only show alarm options if a alarm_control_panel entity exists
@@ -214,22 +454,23 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         arm_state_choices = set(self.entry_data.get(CONF_ALARM_ARM_STATES, [])) or {
             DEFAULT_ALARM_AWAY_MODE
         }
-
         # Determine if a security panel is effectively present (has real arm states)
         has_security = any(
             x.strip() and x.strip() != DEFAULT_ALARM_AWAY_MODE for x in arm_state_choices
         )
 
-        # Always include scan interval; include alarm options only if we have a panel
+        # Base schema: scan interval; alarm options only if we have a panel
+        schema_dict = {
+            vol.Optional(
+                CONF_SCAN_INTERVAL,
+                default=self._config_entry.options.get(
+                    CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+                ),
+            ): vol.All(cv.positive_int, vol.Clamp(min=MIN_SCAN_INTERVAL)),
+        }
         if has_security:
-            data_schema = vol.Schema(
+            schema_dict.update(
                 {
-                    vol.Optional(
-                        CONF_SCAN_INTERVAL,
-                        default=self._config_entry.options.get(
-                            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
-                        ),
-                    ): vol.All(cv.positive_int, vol.Clamp(min=MIN_SCAN_INTERVAL)),
                     vol.Optional(
                         CONF_ALARM_AWAY_MODE,
                         default=self._config_entry.options.get(
@@ -260,22 +501,82 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                             CONF_ALARM_VACATION_MODE, DEFAULT_ALARM_VACATION_MODE
                         ),
                     ): vol.In(sorted(arm_state_choices)),
-                },
-                required=False,
+                }
             )
-        else:
-            data_schema = vol.Schema(
+        # Dynalite: TCP only; show enable toggle only when project has dynalite_trigger devices
+        has_dynalite = director_has_dynalite_triggers(self.entry_data)
+        desc: dict[str, str] = {}
+        if has_dynalite:
+            schema_dict.update(
                 {
                     vol.Optional(
-                        CONF_SCAN_INTERVAL,
+                        CONF_DYNALITE_ENABLED,
                         default=self._config_entry.options.get(
-                            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+                            CONF_DYNALITE_ENABLED, False
                         ),
-                    ): vol.All(cv.positive_int, vol.Clamp(min=MIN_SCAN_INTERVAL)),
-                },
-                required=False,
+                        description="Enable Dynalite gateway listener (TCP)",
+                    ): bool,
+                }
             )
-        return self.async_show_form(step_id="init", data_schema=data_schema)
+            desc[CONF_DYNALITE_ENABLED] = (
+                "Listen to the Dynalite gateway via TCP for trigger events (binary sensors)."
+            )
+        schema = vol.Schema(schema_dict, required=False)
+        try:
+            return self.async_show_form(
+                step_id="configure",
+                data_schema=schema,
+                data_description=desc,
+            )
+        except TypeError:
+            return self.async_show_form(step_id="configure", data_schema=schema)
+
+    async def async_step_configure_dynalite_tcp(self, user_input=None):
+        """Collect TCP host/port and frame layout for Dynalite gateway."""
+        if user_input is not None:
+            merged = {
+                **self._configure_base,
+                CONF_DYNALITE_HOST: (user_input.get(CONF_DYNALITE_HOST) or "").strip(),
+                CONF_DYNALITE_PORT: user_input.get(
+                    CONF_DYNALITE_PORT, DEFAULT_DYNALITE_PORT
+                ),
+                CONF_DYNALITE_PARSE_LAYOUT: user_input.get(
+                    CONF_DYNALITE_PARSE_LAYOUT, DEFAULT_DYNALITE_PARSE_LAYOUT
+                ),
+            }
+            return self.async_create_entry(title="", data=merged)
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_DYNALITE_HOST,
+                    default=self._config_entry.options.get(CONF_DYNALITE_HOST, ""),
+                    description="Dynalite gateway IP",
+                ): str,
+                vol.Optional(
+                    CONF_DYNALITE_PORT,
+                    default=self._config_entry.options.get(
+                        CONF_DYNALITE_PORT, DEFAULT_DYNALITE_PORT
+                    ),
+                    description="Dynalite gateway port",
+                ): cv.port,
+                vol.Optional(
+                    CONF_DYNALITE_PARSE_LAYOUT,
+                    default=self._config_entry.options.get(
+                        CONF_DYNALITE_PARSE_LAYOUT, DEFAULT_DYNALITE_PARSE_LAYOUT
+                    ),
+                    description="TCP frame layout",
+                ): vol.In(
+                    {
+                        DYNALITE_PARSE_LAYOUT_DYNET: "DyNet (standard bus)",
+                        DYNALITE_PARSE_LAYOUT_BYTES_2_3: "Bytes 2–3 (legacy)",
+                    }
+                ),
+            }
+        )
+        return self.async_show_form(
+            step_id="configure_dynalite_tcp",
+            data_schema=schema,
+        )
 
 
 class CannotConnect(exceptions.HomeAssistantError):

@@ -47,6 +47,7 @@ from .const import (
     CONF_CONTROLLER_UNIQUE_ID,
     CONF_DIRECTOR,
     CONF_DIRECTOR_ALL_ITEMS,
+    CONF_DYNALITE_ENABLED,
     CONF_DIRECTOR_MODEL,
     CONF_DIRECTOR_SW_VERSION,
     CONF_WEBSOCKET,
@@ -61,9 +62,24 @@ from .const import (
     RETRY_BACKOFF_MAX_SEC,
     SCHEDULE_REFRESH_ADVANCE_SEC,
 )
-from .director_utils import director_get_entry_variables
+from .config_flow import Control4ExportView
+from .director_utils import (
+    director_get_entry_variables,
+    director_has_dynalite_triggers,
+)
+from . import dynalite as dynalite_module
 
 _LOGGER = logging.getLogger(__name__)
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Register the export view when the integration is loaded (so the route exists before entries)."""
+    hass.data.setdefault(DOMAIN, {})
+    if "_export_view_registered" not in hass.data[DOMAIN]:
+        hass.http.register_view(Control4ExportView())
+        hass.data[DOMAIN]["_export_view_registered"] = True
+    return True
+
 
 PLATFORMS = [
     Platform.LIGHT,
@@ -81,6 +97,9 @@ PLATFORMS = [
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Control4 from a config entry."""
     hass.data.setdefault(DOMAIN, {})
+    if "_export_view_registered" not in hass.data[DOMAIN]:
+        hass.http.register_view(Control4ExportView())
+        hass.data[DOMAIN]["_export_view_registered"] = True
     entry_data = hass.data[DOMAIN].setdefault(entry.entry_id, {})
     config = entry.data
 
@@ -156,6 +175,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         DEFAULT_ALARM_VACATION_MODE,
     }
 
+    # Dynalite gateway listener (TCP) for trigger binary sensors — only when enabled
+    # and Director data includes at least one dynalite_trigger
+    entry_data[CONF_DYNALITE_ENABLED] = entry.options.get(CONF_DYNALITE_ENABLED, False)
+    if entry_data[CONF_DYNALITE_ENABLED]:
+        if director_has_dynalite_triggers(entry_data):
+            await dynalite_module.setup_dynalite_listener(hass, entry, entry_data)
+        else:
+            _LOGGER.info(
+                "Dynalite TCP listener not started: no dynalite_trigger devices in Director data"
+            )
+
     entry_data[CONF_CONFIG_LISTENER] = entry.add_update_listener(update_listener)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -168,6 +198,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
     entry_data = hass.data[DOMAIN][entry.entry_id]
+    if entry_data.get(CONF_DYNALITE_ENABLED):
+        dynalite_module.stop_dynalite_listener(hass, entry.entry_id)
     _LOGGER.debug("Disconnecting C4Websocket for config entry unload")
     await entry_data[CONF_WEBSOCKET].sio_disconnect()
     _LOGGER.debug("Cancelling scheduled token refresh for config entry unload")
@@ -193,12 +225,11 @@ async def get_items_of_category(hass: HomeAssistant, entry: ConfigEntry, categor
     try:
         return_list = await director.get_all_items_by_category(category)
         return return_list
-    except InvalidCategory as e:
+    except InvalidCategory:
         _LOGGER.warning(
-            "Category %s does not exist on this Control4 system, \
-                        entities from this domain will not be setup.",
+            "Category %s does not exist on this Control4 system, "
+            "entities from this domain will not be setup.",
             category,
-            exc_info=True,
         )
         return []
 

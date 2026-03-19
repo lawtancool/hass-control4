@@ -31,5 +31,16 @@ CONF_CONFIG_LISTENER = "config_listener"
 
 CONTROL4_ENTITY_TYPE = 7
 
+# Dynalite gateway listener (TCP only)
+CONF_DYNALITE_ENABLED = "dynalite_enabled"
+CONF_DYNALITE_HOST = "dynalite_host"
+CONF_DYNALITE_PORT = "dynalite_port"
+CONF_DYNALITE_PARSE_LAYOUT = "dynalite_parse_layout"
+DEFAULT_DYNALITE_PORT = 10001
+# Frame layout: "bytes_2_3" = area at byte 2, channel at byte 3; "dynet" = area at byte 1, channel at byte 3 (DyNet standard)
+DYNALITE_PARSE_LAYOUT_BYTES_2_3 = "bytes_2_3"
+DYNALITE_PARSE_LAYOUT_DYNET = "dynet"
+DEFAULT_DYNALITE_PARSE_LAYOUT = DYNALITE_PARSE_LAYOUT_DYNET
+
 RETRY_BACKOFF_MAX_SEC = 30
 SCHEDULE_REFRESH_ADVANCE_SEC = 300

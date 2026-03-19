@@ -1,6 +1,7 @@
 """Platform for Control4 Binary Sensor."""
 from __future__ import annotations
 
+from datetime import datetime
 from functools import cached_property
 import logging
 
@@ -10,9 +11,17 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.event import async_call_later
 
 from . import Control4Entity, get_items_of_category
-from .const import CONF_DIRECTOR, CONF_DIRECTOR_ALL_ITEMS, CONTROL4_ENTITY_TYPE, DOMAIN
+from .const import (
+    CONF_DIRECTOR,
+    CONF_DIRECTOR_ALL_ITEMS,
+    CONF_DYNALITE_ENABLED,
+    CONF_CONTROLLER_UNIQUE_ID,
+    CONTROL4_ENTITY_TYPE,
+    DOMAIN,
+)
 from .director_utils import director_get_entry_variables
 
 _LOGGER = logging.getLogger(__name__)
@@ -40,6 +49,9 @@ CONTROL4_PROXY_MAPPING = {
     CONTROL4_MOTION_PROXY: BinarySensorDeviceClass.MOTION,
     CONTROL4_GARAGE_DOOR_PROXY: BinarySensorDeviceClass.GARAGE_DOOR,
 }
+
+DYNALITE_TRIGGER_PROXY = "dynalite_trigger"
+TRIGGER_RESET_SEC = 2
 
 
 async def async_setup_entry(
@@ -151,6 +163,39 @@ async def async_setup_entry(
                 unique_id,
             )
         )
+
+    # Dynalite trigger binary sensors (updated by TCP listener when enabled)
+    if entry_data.get(CONF_DYNALITE_ENABLED):
+        for item in director_all_items:
+            if (
+                item.get("type") == CONTROL4_ENTITY_TYPE
+                and item.get("id")
+                and item.get("proxy") == DYNALITE_TRIGGER_PROXY
+            ):
+                item_id = item["id"]
+                item_name = str(item.get("name", f"Dynalite {item_id}"))
+                item_area = item.get("roomName", "")
+                item_parent_id = item.get("parentId")
+                item_device_name = None
+                item_manufacturer = item.get("manufacturer")
+                item_model = item.get("model")
+                for parent_item in director_all_items:
+                    if parent_item.get("id") == item_parent_id:
+                        item_device_name = parent_item.get("name")
+                        break
+                entity_list.append(
+                    Control4DynaliteTriggerBinarySensor(
+                        entry_data=entry_data,
+                        entry=entry,
+                        name=item_name,
+                        idx=item_id,
+                        device_name=item_device_name,
+                        device_manufacturer=item_manufacturer,
+                        device_model=item_model,
+                        device_id=item_parent_id or 0,
+                        device_area=item_area,
+                    )
+                )
 
     async_add_entities(entity_list, True)
 
@@ -278,3 +323,83 @@ class Control4BinarySensor(Control4Entity, BinarySensorEntity):  # type: ignore[
         # Rather, they are attached to a room id.
         # Therefore, there is no device info for Home Assistant to use.
         return None
+
+
+class Control4DynaliteTriggerBinarySensor(BinarySensorEntity):
+    """Binary sensor for Dynalite triggers; state is set by the Dynalite TCP listener."""
+
+    _attr_should_poll = False
+    _attr_device_class = BinarySensorDeviceClass.OCCUPANCY
+
+    def __init__(
+        self,
+        entry_data: dict,
+        entry: ConfigEntry,
+        name: str,
+        idx: int,
+        device_name: str | None,
+        device_manufacturer: str | None,
+        device_model: str | None,
+        device_id: int,
+        device_area: str,
+    ) -> None:
+        """Initialize Dynalite trigger binary sensor."""
+        self.entry_data = entry_data
+        self.entry = entry
+        self._attr_name = name
+        self._attr_unique_id = f"{entry.entry_id}_dynalite_{idx}"
+        self._idx = idx
+        self._attr_is_on = False
+        self._device_name = device_name
+        self._device_manufacturer = device_manufacturer
+        self._device_model = device_model
+        self._device_id = device_id
+        self._device_area = device_area
+        self._reset_call = None
+
+    async def async_added_to_hass(self) -> None:
+        """Register this entity so the Dynalite listener can update it."""
+        await super().async_added_to_hass()
+        self.entry_data.setdefault("dynalite_entities", {})[self._idx] = self
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Unregister from dynalite_entities."""
+        if self._reset_call:
+            self._reset_call()
+            self._reset_call = None
+        self.entry_data.get("dynalite_entities", {}).pop(self._idx, None)
+        await super().async_will_remove_from_hass()
+
+    def set_triggered(self) -> None:
+        """Set state to on (triggered) and schedule reset to off after TRIGGER_RESET_SEC."""
+        _LOGGER.debug(
+            "Dynalite binary sensor triggered: item_id=%s entity_id=%s",
+            self._idx,
+            getattr(self, "entity_id", None),
+        )
+        if self._reset_call:
+            self._reset_call()
+            self._reset_call = None
+        self._attr_is_on = True
+        self.hass.add_job(self.async_write_ha_state)
+        self._reset_call = async_call_later(
+            self.hass,
+            TRIGGER_RESET_SEC,
+            self._async_reset_off,
+        )
+
+    async def _async_reset_off(self, _now: datetime) -> None:
+        """Reset state to off on the event loop (async_call_later may not run sync callbacks on loop)."""
+        self._reset_call = None
+        self._attr_is_on = False
+        self.async_write_ha_state()
+
+    @property
+    def device_info(self):
+        """Return device info linking to the Control4 controller."""
+        return {
+            "identifiers": {(DOMAIN, self.entry_data[CONF_CONTROLLER_UNIQUE_ID])},
+            "name": self._device_name or "Control4",
+            "manufacturer": self._device_manufacturer or "Control4",
+            "model": self._device_model,
+        }

@@ -31,6 +31,7 @@ class _SensorMap:
     proxies: set[str] | None = None
 
 SENSORS: list[_SensorMap] = [
+    # Power/energy (proxy in config)
     _SensorMap(
         key="CURRENT_POWER",
         name_suffix="Power",
@@ -55,6 +56,23 @@ SENSORS: list[_SensorMap] = [
         state_class=SensorStateClass.TOTAL,
         proxies={"light_v2"},
     ),
+    # Trigger/level preset (proxy in config)
+    _SensorMap(
+        key="LEVEL",
+        name_suffix="Level",
+        unit=None,
+        device_class=None,
+        state_class=None,
+        proxies={"dynalite_trigger"},
+    ),
+    _SensorMap(
+        key="PRESET",
+        name_suffix="Preset",
+        unit=None,
+        device_class=None,
+        state_class=None,
+        proxies={"dynalite_trigger"},
+    ),
 ]
 
 
@@ -65,6 +83,7 @@ async def async_setup_entry(
 
     director_all_items = entry_data[CONF_DIRECTOR_ALL_ITEMS]
     entities: list[Control4AttrSensor] = []
+    unmatched_vars_sample: list[tuple[int, str, list[str]]] = []  # (id, name, var_names) when no SENSORS match
 
     for item in director_all_items:
         try:
@@ -74,29 +93,31 @@ async def async_setup_entry(
             item_id = item["id"]
             item_area = item["roomName"]
             item_parent_id = item["parentId"]
+            item_proxy = item.get("proxy")
 
             item_manufacturer = None
             item_device_name = None
             item_model = None
 
             for parent_item in director_all_items:
-                if parent_item["id"] == item_parent_id:
-                    item_manufacturer = parent_item["manufacturer"]
-                    item_device_name = parent_item["name"]
-                    item_model = parent_item["model"]
+                if parent_item.get("id") == item_parent_id:
+                    item_manufacturer = parent_item.get("manufacturer")
+                    item_device_name = parent_item.get("name")
+                    item_model = parent_item.get("model")
+                    break
 
-            # Get the item's attrs (not the parent)
-            attrs = await director_get_entry_variables(hass, entry, item_id)
+            # Get the item's attrs (not the parent); normalize keys to uppercase to match WS updates
+            raw_attrs = await director_get_entry_variables(hass, entry, item_id)
+            attrs = {str(k).upper(): v for k, v in raw_attrs.items()}
 
             for sm in SENSORS:
-                # Only match if the key and proxy match
-                if sm.key in attrs and (sm.proxies and item.get("proxy") in sm.proxies):
+                if sm.key in attrs and (sm.proxies and item_proxy in sm.proxies):
                     entities.append(
                         Control4AttrSensor(
                             entry_data=entry_data,
                             entry=entry,
                             name=sm.name_suffix,
-                            idx=item_id,  # Use the item's ID
+                            idx=item_id,
                             device_name=item_device_name,
                             device_manufacturer=item_manufacturer,
                             device_model=item_model,
@@ -107,12 +128,32 @@ async def async_setup_entry(
                         )
                     )
 
+            # Collect variable names when no SENSORS entry matched (for debug)
+            if attrs and len(unmatched_vars_sample) < 3:
+                if not any(
+                    sm.key in attrs and sm.proxies and item_proxy in sm.proxies for sm in SENSORS
+                ):
+                    unmatched_vars_sample.append((item_id, str(item.get("name", "")), list(attrs.keys())))
+
         except Exception:
-            _LOGGER.debug("Skipping invalid light item: %s", item, exc_info=True)
+            _LOGGER.debug("Skipping invalid sensor item: %s", item, exc_info=True)
             continue
 
     if entities:
         async_add_entities(entities, True)
+        _LOGGER.info("Control4 sensor: set up %d entity(ies)", len(entities))
+    else:
+        _LOGGER.info(
+            "Control4 sensor: no entities found (no devices with variables matching SENSORS config: LEVEL, PRESET, CURRENT_POWER, etc.). "
+            "Only binary_sensor (e.g. Dynalite triggers) may appear. Enable debug for 'custom_components.control4.sensor' to see variable names per device."
+        )
+        for item_id, name, var_names in unmatched_vars_sample:
+            _LOGGER.debug(
+                "id=%s name=%s variable keys: %s (add matching keys to SENSORS if needed)",
+                item_id,
+                name,
+                var_names,
+            )
 
 
 class Control4AttrSensor(Control4Entity, SensorEntity):  # type: ignore[misc]
@@ -149,18 +190,15 @@ class Control4AttrSensor(Control4Entity, SensorEntity):  # type: ignore[misc]
         )
 
         self._sm = sensor_map
-        self._attr_unique_id = f"{idx}-{sensor_map.key.lower()}"
+        self._attr_unique_id = f"{idx}-{sensor_map.key.lower().lstrip('_')}"
         self._attr_native_unit_of_measurement = sensor_map.unit
         self._attr_device_class = sensor_map.device_class
         self._attr_state_class = sensor_map.state_class
-        # Hide from entity registry by default
         self._attr_entity_registry_visible_default = False
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to the existing WebSocket."""
         await super().async_added_to_hass()
-        # The WebSocket is already handled by the parent Control4Entity
-        # No further action required
 
     @property
     def available(self) -> bool:  # type: ignore[override]
@@ -172,13 +210,17 @@ class Control4AttrSensor(Control4Entity, SensorEntity):  # type: ignore[misc]
         raw = self.extra_state_attributes.get(self._sm.key)
         if raw is None:
             return None
-        
+
+        if self._sm.unit is not None:
+            try:
+                val = float(raw)
+            except (TypeError, ValueError):
+                return None
+            if self._sm.value_fn:
+                val = self._sm.value_fn(val)
+            return val
+        # No unit: allow string or number (e.g. Preset name or Level 0-100)
         try:
-            val = float(raw)
+            return float(raw)
         except (TypeError, ValueError):
-            return None
-            
-        if self._sm.value_fn:
-            val = self._sm.value_fn(val)
-            
-        return val
+            return str(raw)
