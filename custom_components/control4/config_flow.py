@@ -1,6 +1,11 @@
 """Config flow for Control4 integration."""
-from asyncio import TimeoutError as asyncioTimeoutError
+from __future__ import annotations
+
+import asyncio
+import json
 import logging
+from asyncio import TimeoutError as asyncioTimeoutError
+from typing import Any
 
 from aiohttp.client_exceptions import ClientError
 from pyControl4.account import C4Account
@@ -15,8 +20,13 @@ from homeassistant.const import (
     CONF_USERNAME,
     CONF_SCAN_INTERVAL,
 )
-from homeassistant.core import callback
-from homeassistant.helpers import aiohttp_client, config_validation as cv
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import (
+    aiohttp_client,
+    config_validation as cv,
+    device_registry as dr,
+    entity_registry as er,
+)
 from homeassistant.helpers.device_registry import format_mac
 
 from .const import (
@@ -27,6 +37,8 @@ from .const import (
     CONF_ALARM_NIGHT_MODE,
     CONF_ALARM_VACATION_MODE,
     CONF_CONTROLLER_UNIQUE_ID,
+    CONF_DIRECTOR_ALL_ITEMS,
+    CONTROL4_ENTITY_TYPE,
     DEFAULT_ALARM_AWAY_MODE,
     DEFAULT_ALARM_CUSTOM_BYPASS_MODE,
     DEFAULT_ALARM_HOME_MODE,
@@ -36,8 +48,94 @@ from .const import (
     DOMAIN,
     MIN_SCAN_INTERVAL,
 )
+from .director_utils import director_get_entry_variables, director_get_item_properties
+from .location_floor import (
+    LOCATION_FLOOR_FEATURES_AVAILABLE,
+    _format_table,
+    async_apply_area_floor_to_ha,
+    async_build_location_floor_table,
+    format_table_markdown,
+)
 
 _LOGGER = logging.getLogger(__name__)
+
+
+async def build_control4_export_payload(
+    hass: HomeAssistant, entry_id: str
+) -> dict[str, Any] | None:
+    """Build export payload (meta + items with variables and properties) for the given config entry."""
+    entry_data = (hass.data.get(DOMAIN) or {}).get(entry_id)
+    if not entry_data:
+        return None
+    data = entry_data.get(CONF_DIRECTOR_ALL_ITEMS)
+    if not data:
+        return None
+    entry = next(
+        (e for e in hass.config_entries.async_entries(DOMAIN) if e.entry_id == entry_id),
+        None,
+    )
+    if not entry:
+        return None
+
+    export_list = [dict(item) for item in data]
+    device_indices = [
+        i
+        for i, item in enumerate(export_list)
+        if item.get("type") == CONTROL4_ENTITY_TYPE and item.get("id")
+    ]
+
+    async def fetch_vars(index: int) -> tuple[int, dict[str, Any]]:
+        item = export_list[index]
+        item_id = item["id"]
+        try:
+            variables = await director_get_entry_variables(hass, entry, item_id)
+            return (index, variables)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Export: failed to get variables for item %s: %s", item_id, err)
+            return (index, {"_error": str(err)})
+
+    batch_size = 20
+    for start in range(0, len(device_indices), batch_size):
+        batch = device_indices[start : start + batch_size]
+        results = await asyncio.gather(*(fetch_vars(i) for i in batch))
+        for index, variables in results:
+            export_list[index]["variables"] = variables
+
+    # Director properties per item (user-triggered export; not a hot path).
+    properties_indices = [
+        i for i, item in enumerate(export_list) if item.get("id") is not None
+    ]
+
+    async def fetch_props(index: int) -> tuple[int, dict[str, Any] | None]:
+        item = export_list[index]
+        item_id = item["id"]
+        props = await director_get_item_properties(hass, entry, item_id)
+        return (index, props)
+
+    for start in range(0, len(properties_indices), batch_size):
+        batch = properties_indices[start : start + batch_size]
+        results = await asyncio.gather(*(fetch_props(i) for i in batch))
+        for index, props in results:
+            export_list[index]["properties"] = props
+
+    dev_reg = dr.async_get(hass)
+    ha_device_count = sum(
+        1 for d in dev_reg.devices.values() if entry.entry_id in d.config_entries
+    )
+    entity_reg = er.async_get(hass)
+    ha_entities: dict[str, int] = {}
+    for entity in entity_reg.entities.values():
+        if entity.config_entry_id != entry.entry_id:
+            continue
+        platform = entity.platform or "unknown"
+        ha_entities[platform] = ha_entities.get(platform, 0) + 1
+
+    return {
+        "meta": {"ha_device_count": ha_device_count, "ha_entities": ha_entities},
+        "items": export_list,
+    }
+
+
 
 DATA_SCHEMA = vol.Schema(
     {
@@ -200,8 +298,192 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         # Do not assign to self.config_entry; it's a read-only property in HA.
         self._config_entry = config_entry
 
+    def _entry_data_ready(self):
+        """Return True if integration entry data is loaded (for table/apply)."""
+        entry_data = self.hass.data.get(DOMAIN, {}).get(self._config_entry.entry_id)
+        return bool(entry_data and entry_data.get(CONF_DIRECTOR_ALL_ITEMS))
+
+    @staticmethod
+    def _options_menu_choices() -> dict[str, str]:
+        """Build init-step menu; area/floor/export require floor registry (HA 2024.3+)."""
+        menu = {
+            "configure": "Configure options (scan interval, alarm modes)",
+        }
+        if LOCATION_FLOOR_FEATURES_AVAILABLE:
+            menu["table"] = "Show c4 device area/floor"
+            menu["apply"] = "Apply c4 device area/floor to HA"
+            menu["export_file"] = (
+                "Write director export JSON to configuration folder"
+            )
+        return menu
+
+    async def _notify_and_close(self, title: str, message: str, notification_id: str):
+        """Send a persistent notification and close the options flow."""
+        await self.hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": title,
+                "message": message,
+                "notification_id": notification_id,
+            },
+        )
+        return self.async_create_entry(title="", data=self._config_entry.options)
+
+    async def _handle_show_table(self):
+        """Build area/floor table, send notification, and close flow."""
+        try:
+            rows = await async_build_location_floor_table(
+                self.hass, self._config_entry
+            )
+            full_table = _format_table(rows, max_rows=999)
+            notification_table = format_table_markdown(rows, max_rows=150)
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.exception("Failed to build area/floor table: %s", err)
+            full_table = f"(Error: {err})"
+            notification_table = f"_Error: {err}_"
+        _LOGGER.info(
+            "Control4 area/floor mapping (full table):\n%s",
+            full_table,
+        )
+        return await self._notify_and_close(
+            "Control4 area/floor mapping",
+            notification_table,
+            "control4_area_floor_table",
+        )
+
+    def _format_apply_message(self, summary: dict) -> str:
+        """Build the notification message from apply summary."""
+        created_f = summary.get("created_floors") or []
+        created_a = summary.get("created_areas") or []
+        updated = summary.get("updated_devices") or 0
+        mismatched = summary.get("mismatched_after_apply", 0)
+        errs = summary.get("errors") or []
+        skipped = summary.get("skipped_no_area") or []
+        skipped_room = summary.get("skipped_no_c4_room") or []
+        msg = (
+            f"- **Floors created:** {len(created_f)}\n"
+            f"- **Areas created:** {len(created_a)}\n"
+            f"- **Devices assigned:** {updated}\n"
+            f"- **C4 devices with room/floor different from HA:** {mismatched}\n"
+        )
+        if skipped_room:
+            msg += (
+                f"\n**Skipped (C4 has no room name, no HA area):** "
+                f"{len(skipped_room)} entities (IDs: {', '.join(str(x) for x in skipped_room[:30])}"
+            )
+            if len(skipped_room) > 30:
+                msg += ", …"
+            msg += ")\n"
+        if skipped:
+            msg += f"\n**Skipped (no area for location):** {len(skipped)} devices\n"
+            for row_id, fl, rm in skipped[:20]:
+                msg += f"- ID {row_id}: floor={fl!r}, room={rm!r}\n"
+            if len(skipped) > 20:
+                msg += f"- ... and {len(skipped) - 20} more\n"
+        if errs:
+            msg += "\n**Errors:**\n" + "\n".join(f"- {e}" for e in errs)
+        return msg
+
+    async def _handle_apply(self):
+        """Run apply area/floor to HA, send result notification, and close flow."""
+        try:
+            summary = await async_apply_area_floor_to_ha(
+                self.hass, self._config_entry
+            )
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.exception("Failed to apply area/floor to HA: %s", err)
+            summary = {
+                "errors": [str(err)],
+                "created_floors": [],
+                "created_areas": [],
+                "updated_devices": 0,
+                "skipped_no_area": [],
+                "skipped_no_c4_room": [],
+                "mismatched_after_apply": 0,
+            }
+        msg = self._format_apply_message(summary)
+        return await self._notify_and_close(
+            "Control4 apply area/floor",
+            msg,
+            "control4_apply_area_floor",
+        )
+
+    async def _handle_write_export(self):
+        """Write director export JSON under the HA configuration directory."""
+        entry_id = self._config_entry.entry_id
+        payload = await build_control4_export_payload(self.hass, entry_id)
+        if not payload:
+            return await self._notify_and_close(
+                "Control4 export",
+                "Export data is not available. Wait for the Control4 integration to finish loading, then try again.",
+                "control4_export_json",
+            )
+        filename = f"control4_director_export_{entry_id}.json"
+        path = self.hass.config.path(filename)
+
+        def _write() -> None:
+            with open(path, "w", encoding="utf-8") as fp:
+                json.dump(payload, fp, indent=2, ensure_ascii=False, default=str)
+
+        try:
+            await self.hass.async_add_executor_job(_write)
+        except OSError as err:
+            _LOGGER.exception("Failed to write Control4 export: %s", err)
+            return await self._notify_and_close(
+                "Control4 export",
+                f"Could not write export file: {err}",
+                "control4_export_json",
+            )
+        return await self._notify_and_close(
+            "Control4 export",
+            f"Wrote director export JSON to:\n\n`{path}`",
+            "control4_export_json",
+        )
+
     async def async_step_init(self, user_input=None):
-        """Handle options flow."""
+        """Handle options flow: menu to choose configure or show table."""
+        choices = self._options_menu_choices()
+        if user_input is not None:
+            choice = user_input.get("Settings")
+            if choice == "table" and LOCATION_FLOOR_FEATURES_AVAILABLE:
+                if not self._entry_data_ready():
+                    return await self._notify_and_close(
+                        "Control4 area/floor mapping",
+                        "Integration data is not ready. Please try again after the integration has finished loading.",
+                        "control4_area_floor_table",
+                    )
+                return await self._handle_show_table()
+            if choice == "apply" and LOCATION_FLOOR_FEATURES_AVAILABLE:
+                if not self._entry_data_ready():
+                    return await self._notify_and_close(
+                        "Control4 apply area/floor",
+                        "Integration data is not ready. Please try again after the integration has finished loading.",
+                        "control4_apply_area_floor",
+                    )
+                return await self._handle_apply()
+            if choice == "export_file" and LOCATION_FLOOR_FEATURES_AVAILABLE:
+                if not self._entry_data_ready():
+                    return await self._notify_and_close(
+                        "Control4 export",
+                        "Integration data is not ready. Please try again after the integration has finished loading.",
+                        "control4_export_json",
+                    )
+                return await self._handle_write_export()
+            return await self.async_step_configure()
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("Settings", default="configure"): vol.In(choices),
+                }
+            ),
+            description_placeholders={"heading": "Control4 settings"},
+        )
+
+    async def async_step_configure(self, user_input=None):
+        """Handle the configure-options form (scan interval, alarm modes)."""
         if user_input is not None:
             _LOGGER.debug(user_input)
             return self.async_create_entry(title="", data=user_input)
@@ -214,7 +496,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         arm_state_choices = set(self.entry_data.get(CONF_ALARM_ARM_STATES, [])) or {
             DEFAULT_ALARM_AWAY_MODE
         }
-
         # Determine if a security panel is effectively present (has real arm states)
         has_security = any(
             x.strip() and x.strip() != DEFAULT_ALARM_AWAY_MODE for x in arm_state_choices
@@ -275,7 +556,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 },
                 required=False,
             )
-        return self.async_show_form(step_id="init", data_schema=data_schema)
+        return self.async_show_form(step_id="configure", data_schema=data_schema)
 
 
 class CannotConnect(exceptions.HomeAssistantError):
