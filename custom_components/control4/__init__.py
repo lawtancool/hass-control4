@@ -25,7 +25,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers import aiohttp_client, device_registry as dr
+from homeassistant.helpers import aiohttp_client, device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.event import async_call_later
@@ -49,6 +49,7 @@ from .const import (
     CONF_DIRECTOR_ALL_ITEMS,
     CONF_DIRECTOR_MODEL,
     CONF_DIRECTOR_SW_VERSION,
+    CONF_ENTITY_PREPEND_PARENT_NAME,
     CONF_WEBSOCKET,
     CONF_UI_CONFIGURATION,
     DEFAULT_ALARM_AWAY_MODE,
@@ -56,6 +57,7 @@ from .const import (
     DEFAULT_ALARM_HOME_MODE,
     DEFAULT_ALARM_NIGHT_MODE,
     DEFAULT_ALARM_VACATION_MODE,
+    DEFAULT_ENTITY_PREPEND_PARENT_NAME,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     RETRY_BACKOFF_MAX_SEC,
@@ -146,6 +148,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     entry_data[CONF_ALARM_VACATION_MODE] = entry.options.get(
         CONF_ALARM_VACATION_MODE, DEFAULT_ALARM_VACATION_MODE
+    )
+    entry_data[CONF_ENTITY_PREPEND_PARENT_NAME] = entry.options.get(
+        CONF_ENTITY_PREPEND_PARENT_NAME, DEFAULT_ENTITY_PREPEND_PARENT_NAME
     )
 
     entry_data[CONF_ALARM_ARM_STATES] = {
@@ -395,10 +400,31 @@ class Control4Entity(Entity):
         self._extra_state_attributes["parent item id"] = device_id
         # Disable polling
         self._attr_should_poll = False
+        self._attr_has_entity_name = entry_data.get(
+            CONF_ENTITY_PREPEND_PARENT_NAME, DEFAULT_ENTITY_PREPEND_PARENT_NAME
+        )
 
     async def async_added_to_hass(self):
         """Add entity to hass. Register Websockets callbacks to receive entity state updates from Control4."""
         await super().async_added_to_hass()
+        # Optional short friendly names (entity_prepend_parent_name off): Home Assistant
+        # still prepends the parent device name when the entity has a device_id and the
+        # entity registry has no user "name" override. We set registry name to the short
+        # item name so the UI shows only that string while keeping device_id (areas/rooms).
+        # When prepend is on again, clear registry name only if it still equals the item
+        # name so default device+suffix naming returns without wiping a custom user name.
+        prepend = self.entry_data.get(
+            CONF_ENTITY_PREPEND_PARENT_NAME, DEFAULT_ENTITY_PREPEND_PARENT_NAME
+        )
+        registry = er.async_get(self.hass)
+        reg_entry = registry.async_get(self.entity_id)
+        if reg_entry is not None:
+            if not prepend:
+                if reg_entry.name is None and self._attr_name not in (None, ""):
+                    registry.async_update_entity(self.entity_id, name=self._attr_name)
+            elif reg_entry.name is not None and reg_entry.name == self._attr_name:
+                registry.async_update_entity(self.entity_id, name=None)
+
         await self.hass.async_add_executor_job(
             self.entry_data[CONF_WEBSOCKET].add_item_callback,
             self._idx,

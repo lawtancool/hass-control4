@@ -16,7 +16,7 @@ from homeassistant.const import (
     CONF_SCAN_INTERVAL,
 )
 from homeassistant.core import callback
-from homeassistant.helpers import aiohttp_client, config_validation as cv
+from homeassistant.helpers import aiohttp_client, config_validation as cv, selector
 from homeassistant.helpers.device_registry import format_mac
 
 from .const import (
@@ -27,11 +27,13 @@ from .const import (
     CONF_ALARM_NIGHT_MODE,
     CONF_ALARM_VACATION_MODE,
     CONF_CONTROLLER_UNIQUE_ID,
+    CONF_ENTITY_PREPEND_PARENT_NAME,
     DEFAULT_ALARM_AWAY_MODE,
     DEFAULT_ALARM_CUSTOM_BYPASS_MODE,
     DEFAULT_ALARM_HOME_MODE,
     DEFAULT_ALARM_NIGHT_MODE,
     DEFAULT_ALARM_VACATION_MODE,
+    DEFAULT_ENTITY_PREPEND_PARENT_NAME,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     MIN_SCAN_INTERVAL,
@@ -204,7 +206,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """Handle options flow."""
         if user_input is not None:
             _LOGGER.debug(user_input)
-            return self.async_create_entry(title="", data=user_input)
+            data = {**self._config_entry.options, **user_input}
+            return self.async_create_entry(title="", data=data)
 
         # TODO: figure out how to accept empty strings to disable modes
         # TODO: figure out how to only show alarm options if a alarm_control_panel entity exists
@@ -218,6 +221,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         # Determine if a security panel is effectively present (has real arm states)
         has_security = any(
             x.strip() and x.strip() != DEFAULT_ALARM_AWAY_MODE for x in arm_state_choices
+        )
+
+        prepend_default = self._config_entry.options.get(
+            CONF_ENTITY_PREPEND_PARENT_NAME, DEFAULT_ENTITY_PREPEND_PARENT_NAME
         )
 
         # Always include scan interval; include alarm options only if we have a panel
@@ -260,6 +267,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                             CONF_ALARM_VACATION_MODE, DEFAULT_ALARM_VACATION_MODE
                         ),
                     ): vol.In(sorted(arm_state_choices)),
+                    vol.Optional(
+                        CONF_ENTITY_PREPEND_PARENT_NAME,
+                        default=prepend_default,
+                    ): selector.BooleanSelector(),
                 },
                 required=False,
             )
@@ -272,6 +283,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
                         ),
                     ): vol.All(cv.positive_int, vol.Clamp(min=MIN_SCAN_INTERVAL)),
+                    vol.Optional(
+                        CONF_ENTITY_PREPEND_PARENT_NAME,
+                        default=prepend_default,
+                    ): selector.BooleanSelector(),
                 },
                 required=False,
             )
