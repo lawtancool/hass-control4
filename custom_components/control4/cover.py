@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from homeassistant.components.cover import (
+	ATTR_POSITION,
 	CoverEntity,
 	CoverEntityFeature,
 )
@@ -109,11 +110,12 @@ async def async_setup_entry(
 
 class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 	"""Control4 cover (blinds/shades) entity."""
-	_attr_assumed_state = True
+	# _attr_assumed_state = True
 	_attr_supported_features = (
 		CoverEntityFeature.OPEN
 		| CoverEntityFeature.CLOSE
 		| CoverEntityFeature.STOP
+		| CoverEntityFeature.SET_POSITION
 	)
 
 	def create_api_object(self) -> C4Blind:
@@ -128,13 +130,23 @@ class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 
 	@property
 	def current_cover_position(self) -> int | None:  # type: ignore[override]
-		"""Unknown in stateless mode to keep both buttons enabled."""
-		return None
+		"""Get cover position."""
+		return self._extra_state_attributes["Level"]
 
 	@property
 	def is_closed(self) -> bool | None:  # type: ignore[override]
-		"""Unknown in stateless mode to keep both buttons enabled."""
-		return None
+		"""Is cover closed."""
+		return self._extra_state_attributes["Fully Closed"]
+
+	@property
+	def is_closing(self) -> bool | None:  # type: ignore[override]
+		"""Is cover closing."""
+		return self._extra_state_attributes["Closing"]
+
+	@property
+	def is_opening(self) -> bool | None:  # type: ignore[override]
+		"""Is cover opening."""
+		return self._extra_state_attributes["Opening"]
 
 	async def async_open_cover(self, **kwargs: Any) -> None:
 		"""Open the cover."""
@@ -147,11 +159,11 @@ class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 		await c4_blind.close()
 
 	async def async_set_cover_position(self, **kwargs: Any) -> None:
-		"""No-op in stateless mode (no position slider)."""
-		return
+		"""Set blind position."""
+		c4_blind = self.create_api_object()
+		await c4_blind.set_level_target(level=kwargs.get(ATTR_POSITION))
 
 	async def async_stop_cover(self, **kwargs: Any) -> None:
 		"""Stop the cover."""
 		c4_blind = self.create_api_object()
 		await c4_blind.stop()
-
