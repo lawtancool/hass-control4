@@ -27,13 +27,19 @@ from .director_utils import director_get_entry_variables
 _LOGGER = logging.getLogger(__name__)
 
 # Substrings commonly found in Control4 proxy identifiers for window coverings
-_COVER_PROXY_SUBSTRINGS = (
+_COVER_PROXY_SUBSTRINGS = {
 	"shade",
 	"blind",
 	"windowcover",
 	"curtain",
 	"drap",
-)
+}
+
+_POSITION_SUPPORTED_DEVICE_MODELS = {
+	"qmotion": {
+		"qadvanced roller shade",
+	}
+}
 
 
 async def async_setup_entry(
@@ -52,7 +58,14 @@ async def async_setup_entry(
 		if not proxy_value or not isinstance(proxy_value, str):
 			return False
 		p = proxy_value.lower()
-		return any(s in p for s in _COVER_PROXY_SUBSTRINGS)
+		return p in _COVER_PROXY_SUBSTRINGS
+
+	def _supports_position(device_manufacturer: str | None, device_model: str | None) -> bool:
+		if not device_model or not isinstance(device_model, str) or not device_manufacturer or not isinstance(device_manufacturer, str):
+			return False
+		k = device_manufacturer.lower()
+		p = device_model.lower()
+		return p in _POSITION_SUPPORTED_DEVICE_MODELS.get(k, {})
 
 	# Identify cover entities via proxy type heuristics
 	cover_items: list[dict[str, Any]] = [
@@ -75,12 +88,14 @@ async def async_setup_entry(
 			item_manufacturer = None
 			item_device_name = None
 			item_model = None
+			is_positional = False
 
 			parent = items_by_id.get(item_parent_id)
 			if parent:
 				item_manufacturer = parent.get("manufacturer")
 				item_device_name = parent.get("name")
 				item_model = parent.get("model")
+				is_positional = _supports_position(item_manufacturer, item_model)
 		except KeyError:
 			_LOGGER.exception(
 				"Unknown device properties received from Control4: %s",
@@ -89,6 +104,7 @@ async def async_setup_entry(
 			continue
 
 		item_attributes = await director_get_entry_variables(hass, entry, item_id)
+		item_attributes["positional"] = is_positional
 
 		entity_list.append(
 			Control4Cover(
@@ -110,13 +126,27 @@ async def async_setup_entry(
 
 class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 	"""Control4 cover (blinds/shades) entity."""
-	# _attr_assumed_state = True
-	_attr_supported_features = (
-		CoverEntityFeature.OPEN
-		| CoverEntityFeature.CLOSE
-		| CoverEntityFeature.STOP
-		| CoverEntityFeature.SET_POSITION
-	)
+
+	def __init__(
+		self,
+		*args
+	) -> None:
+		super().__init__(*args)
+		self._is_positional = self._extra_state_attributes["positional"]
+		if self._is_positional:
+			self._attr_supported_features = (
+				CoverEntityFeature.OPEN
+				| CoverEntityFeature.CLOSE
+				| CoverEntityFeature.STOP
+				| CoverEntityFeature.SET_POSITION
+			)
+		else:
+			self._attr_assumed_state = True
+			self._attr_supported_features = (
+				CoverEntityFeature.OPEN
+				| CoverEntityFeature.CLOSE
+				| CoverEntityFeature.STOP
+			)
 
 	def create_api_object(self) -> C4Blind:
 		"""Create a pyControl4 device object.
@@ -131,21 +161,29 @@ class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 	@property
 	def current_cover_position(self) -> int | None:  # type: ignore[override]
 		"""Get cover position."""
+		if not self._is_positional:
+			return None
 		return self._extra_state_attributes["Level"]
 
 	@property
 	def is_closed(self) -> bool | None:  # type: ignore[override]
 		"""Is cover closed."""
+		if not self._is_positional:
+			return None
 		return self._extra_state_attributes["Fully Closed"]
 
 	@property
 	def is_closing(self) -> bool | None:  # type: ignore[override]
 		"""Is cover closing."""
+		if not self._is_positional:
+			return None
 		return self._extra_state_attributes["Closing"]
 
 	@property
 	def is_opening(self) -> bool | None:  # type: ignore[override]
 		"""Is cover opening."""
+		if not self._is_positional:
+			return None
 		return self._extra_state_attributes["Opening"]
 
 	async def async_open_cover(self, **kwargs: Any) -> None:
@@ -160,6 +198,8 @@ class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 
 	async def async_set_cover_position(self, **kwargs: Any) -> None:
 		"""Set blind position."""
+		if not self._is_positional:
+			return None
 		c4_blind = self.create_api_object()
 		await c4_blind.set_level_target(level=kwargs.get(ATTR_POSITION))
 
