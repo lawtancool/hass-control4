@@ -134,6 +134,7 @@ class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 		super().__init__(*args)
 		self._is_positional = self._extra_state_attributes["positional"]
 		if self._is_positional:
+			self._attr_assumed_state = False
 			self._attr_supported_features = (
 				CoverEntityFeature.OPEN
 				| CoverEntityFeature.CLOSE
@@ -210,7 +211,7 @@ class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 
 	async def async_update(self) -> None:
 		"""Get the cover state from the device"""
-		if _attr_assumed_state:
+		if self._attr_assumed_state:
 			return None
 		director = self.entry_data[CONF_DIRECTOR]
 		data = await director.get_item_variables(self._idx)
