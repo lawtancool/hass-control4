@@ -207,3 +207,12 @@ class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 		"""Stop the cover."""
 		c4_blind = self.create_api_object()
 		await c4_blind.stop()
+
+	async def async_update(self) -> None:
+		"""Get the cover state from the device"""
+		if _attr_assumed_state:
+			return None
+		director = self.entry_data[CONF_DIRECTOR]
+		data = await director.get_item_variables(self._idx)
+		for item in data:
+			self._extra_state_attributes[item["varName"]] = item["value"]
