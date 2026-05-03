@@ -27,20 +27,23 @@ from .director_utils import director_get_entry_variables
 _LOGGER = logging.getLogger(__name__)
 
 # Substrings commonly found in Control4 proxy identifiers for window coverings
-_COVER_PROXY_SUBSTRINGS = {
+_COVER_PROXY_SUBSTRINGS = (
 	"shade",
 	"blind",
 	"windowcover",
 	"curtain",
 	"drap",
-}
+)
 
+# Manufacturers and models that support level positionnig
 _POSITION_SUPPORTED_DEVICE_MODELS = {
 	"qmotion": {
 		"qadvanced roller shade",
 	}
 }
 
+_MIN_COVER_LEVEL = 0
+_MAX_COVER_LEVEL = 100
 
 async def async_setup_entry(
 	hass: HomeAssistant,
@@ -58,7 +61,7 @@ async def async_setup_entry(
 		if not proxy_value or not isinstance(proxy_value, str):
 			return False
 		p = proxy_value.lower()
-		return p in _COVER_PROXY_SUBSTRINGS
+		return any(s in p for s in _COVER_PROXY_SUBSTRINGS)
 
 	def _supports_position(device_manufacturer: str | None, device_model: str | None) -> bool:
 		if not device_model or not isinstance(device_model, str) or not device_manufacturer or not isinstance(device_manufacturer, str):
@@ -104,10 +107,10 @@ async def async_setup_entry(
 			continue
 
 		item_attributes = await director_get_entry_variables(hass, entry, item_id)
-		item_attributes["positional"] = is_positional
 
 		entity_list.append(
 			Control4Cover(
+				is_positional,
 				entry_data,
 				entry,
 				item_name,
@@ -128,13 +131,35 @@ class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 	"""Control4 cover (blinds/shades) entity."""
 
 	def __init__(
-		self,
-		*args
+        self,
+        is_positional: bool,
+        entry_data: dict,
+        entry: ConfigEntry,
+        name: str,
+        idx: int,
+        device_name: str | None,
+        device_manufacturer: str | None,
+        device_model: str | None,
+        device_id: int,
+        device_area: str | None,
+        device_attributes: dict,
 	) -> None:
-		super().__init__(*args)
-		self._is_positional = self._extra_state_attributes["positional"]
+		super().__init__(
+			entry_data,
+			entry,
+			name,
+			idx,
+			device_name,
+			device_manufacturer,
+			device_model,
+			device_id,
+			device_area,
+			device_attributes,
+		)
+		self._is_positional = is_positional
 		if self._is_positional:
 			self._attr_should_poll = True
+			self._attr_assumed_state = False
 			self._attr_supported_features = (
 				CoverEntityFeature.OPEN
 				| CoverEntityFeature.CLOSE
@@ -142,6 +167,8 @@ class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 				| CoverEntityFeature.SET_POSITION
 			)
 		else:
+			self._attr_should_poll = False
+			self._attr_assumed_state = True
 			self._attr_supported_features = (
 				CoverEntityFeature.OPEN
 				| CoverEntityFeature.CLOSE
@@ -163,28 +190,33 @@ class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 		"""Get cover position."""
 		if not self._is_positional:
 			return None
-		return self._extra_state_attributes["Level"]
+		p = self._extra_state_attributes.get("Level")
+		if isinstance(p, str) and p.isdigit():
+			p = int(p)
+		if isinstance(p, int) and p >= _MIN_COVER_LEVEL and p <= _MAX_COVER_LEVEL:
+			return p
+		_LOGGER.exception("Got invalid position value from C4 %s", p)
 
 	@property
 	def is_closed(self) -> bool | None:  # type: ignore[override]
 		"""Is cover closed."""
 		if not self._is_positional:
 			return None
-		return self._extra_state_attributes["Fully Closed"]
+		return self._extra_state_attributes.get("Fully Closed")
 
 	@property
 	def is_closing(self) -> bool | None:  # type: ignore[override]
 		"""Is cover closing."""
 		if not self._is_positional:
 			return None
-		return self._extra_state_attributes["Closing"]
+		return self._extra_state_attributes.get("Closing")
 
 	@property
 	def is_opening(self) -> bool | None:  # type: ignore[override]
 		"""Is cover opening."""
 		if not self._is_positional:
 			return None
-		return self._extra_state_attributes["Opening"]
+		return self._extra_state_attributes.get("Opening")
 
 	async def async_open_cover(self, **kwargs: Any) -> None:
 		"""Open the cover."""
@@ -200,8 +232,13 @@ class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 		"""Set blind position."""
 		if not self._is_positional:
 			return None
+		p = kwargs.get(ATTR_POSITION)
+		if not isinstance(p, int):
+			_LOGGER.exception("Invalid cover position given %s", p)
+			return None
+		p = max(_MIN_COVER_LEVEL, min(p, _MAX_COVER_LEVEL))
 		c4_blind = self.create_api_object()
-		await c4_blind.set_level_target(level=kwargs.get(ATTR_POSITION))
+		await c4_blind.set_level_target(level=p)
 
 	async def async_stop_cover(self, **kwargs: Any) -> None:
 		"""Stop the cover."""
