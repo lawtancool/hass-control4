@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import (
+	Any,
+	Callable
+)
 
 from homeassistant.components.cover import (
 	ATTR_POSITION,
 	CoverEntity,
 	CoverEntityFeature,
+	CoverDeviceClass,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -35,12 +39,66 @@ _COVER_PROXY_SUBSTRINGS = (
 	"drap",
 )
 
+_DEFAULT_SUPPORTED_FEATURES = (
+    CoverEntityFeature.OPEN
+	| CoverEntityFeature.CLOSE
+	| CoverEntityFeature.STOP
+)
+
+class Control4CoverModel:  # type: ignore[misc]
+	def __init__(
+		self,
+		cover_device_class: CoverDeviceClass | None = None,
+		is_stateful: bool = False,
+		fn_position: Callable[[dict[str, Any]], bool] | None = None,
+		fn_is_closed: Callable[[dict[str, Any]], bool] | None = None,
+		fn_is_closing: Callable[[dict[str, Any]], bool] | None = None,
+		fn_is_opening: Callable[[dict[str, Any]], bool] | None = None,
+		supported_features: CoverEntityFeature = _DEFAULT_SUPPORTED_FEATURES
+	) -> None:
+		self.cover_device_class = cover_device_class
+		self.is_stateful = is_stateful if is_stateful is not None else False
+		self.fn_get_position = fn_position
+		self.fn_is_closed = fn_is_closed
+		self.fn_is_closing = fn_is_closing
+		self.fn_is_opening = fn_is_opening
+		self.supported_features = supported_features
+
+	def get_position(self, attributes: dict[str, Any]) -> bool | None:
+		if self.fn_get_position is not None:
+			return self.fn_get_position(attributes)
+
+	def get_is_closed(self, attributes: dict[str, Any]) -> bool | None:
+		if self.fn_is_closed is not None:
+			return self.fn_is_closed(attributes)
+
+	def get_is_closing(self, attributes: dict[str, Any]) -> bool | None:
+		if self.fn_is_closing is not None:
+			return self.fn_is_closing(attributes)
+
+	def get_is_opening(self, attributes: dict[str, Any]) -> bool | None:
+		if self.fn_is_opening is not None:
+			return self.fn_is_opening(attributes)
+
 # Manufacturers and models that support level positionnig
-_POSITION_SUPPORTED_DEVICE_MODELS = {
-	"qmotion": {
-		"qadvanced roller shade",
-	}
+_KNOWN_COVER_MODELS = {
+	"blind_qmotion_qadvanced_roller_shade.c4z": Control4CoverModel(
+		cover_device_class	= CoverDeviceClass.SHADE,
+		is_stateful 		= True,
+		fn_get_position		= lambda attr: attr.get("Level"),
+		fn_is_closed		= lambda attr: attr.get("Fully Closed"),
+		fn_is_closing		= lambda attr: attr.get("Closing"),
+		fn_is_opening		= lambda attr: attr.get("Opening"),
+		supported_features	= _DEFAULT_SUPPORTED_FEATURES | CoverEntityFeature.SET_POSITION,
+	),
+	"gate_relay_control.c4z": Control4CoverModel(
+		cover_device_class	= CoverDeviceClass.GATE,
+		is_stateful			= True,
+		fn_is_closed		= lambda attr: attr.get("STATE") == "Closed",
+	),
 }
+
+_DEFAULT_COVER_MODEL = Control4CoverModel()
 
 _MIN_COVER_LEVEL = 0
 _MAX_COVER_LEVEL = 100
@@ -63,25 +121,24 @@ async def async_setup_entry(
 		p = proxy_value.lower()
 		return any(s in p for s in _COVER_PROXY_SUBSTRINGS)
 
-	def _supports_position(device_manufacturer: str | None, device_model: str | None) -> bool:
-		if not device_model or not isinstance(device_model, str) or not device_manufacturer or not isinstance(device_manufacturer, str):
-			return False
-		k = device_manufacturer.lower()
-		p = device_model.lower()
-		return p in _POSITION_SUPPORTED_DEVICE_MODELS.get(k, {})
-
-	# Identify cover entities via proxy type heuristics
-	cover_items: list[dict[str, Any]] = [
-		item
-		for item in all_items
-		if item.get("type") == CONTROL4_ENTITY_TYPE
-		and item.get("id")
-		and _is_cover_proxy(item.get("proxy"))
-	]
-
+	def _get_cover_model(item: dict[str, Any]) -> Control4CoverModel | None:
+		cover_model = _KNOWN_COVER_MODELS.get(item.get("protocolFilename"))
+		if cover_model is not None:
+			return cover_model
+		# Identify cover entities via proxy type heuristics
+		if _is_cover_proxy(item.get("proxy")):
+			return _DEFAULT_COVER_MODEL
+	
 	entity_list: list[Control4Cover] = []
 
-	for item in cover_items:
+	for item in all_items:
+		if item.get("type") != CONTROL4_ENTITY_TYPE or not item.get("id"):
+			continue
+
+		cover_model = _get_cover_model(item)
+		if cover_model is None:
+			continue
+
 		try:
 			item_name = str(item["name"])
 			item_id = item["id"]
@@ -91,14 +148,12 @@ async def async_setup_entry(
 			item_manufacturer = None
 			item_device_name = None
 			item_model = None
-			is_positional = False
 
 			parent = items_by_id.get(item_parent_id)
 			if parent:
 				item_manufacturer = parent.get("manufacturer")
 				item_device_name = parent.get("name")
 				item_model = parent.get("model")
-				is_positional = _supports_position(item_manufacturer, item_model)
 		except KeyError:
 			_LOGGER.exception(
 				"Unknown device properties received from Control4: %s",
@@ -110,7 +165,7 @@ async def async_setup_entry(
 
 		entity_list.append(
 			Control4Cover(
-				is_positional,
+				cover_model,
 				entry_data,
 				entry,
 				item_name,
@@ -132,7 +187,7 @@ class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 
 	def __init__(
         self,
-        is_positional: bool,
+        cover_model: Control4CoverModel,
         entry_data: dict,
         entry: ConfigEntry,
         name: str,
@@ -156,24 +211,15 @@ class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 			device_area,
 			device_attributes,
 		)
-		self._is_positional = is_positional
-		if self._is_positional:
+		self._cover_model = cover_model
+		self._attr_device_class = cover_model.cover_device_class
+		self._attr_supported_features = self._cover_model.supported_features
+		if self._cover_model.is_stateful:
 			self._attr_should_poll = True
 			self._attr_assumed_state = False
-			self._attr_supported_features = (
-				CoverEntityFeature.OPEN
-				| CoverEntityFeature.CLOSE
-				| CoverEntityFeature.STOP
-				| CoverEntityFeature.SET_POSITION
-			)
 		else:
 			self._attr_should_poll = False
 			self._attr_assumed_state = True
-			self._attr_supported_features = (
-				CoverEntityFeature.OPEN
-				| CoverEntityFeature.CLOSE
-				| CoverEntityFeature.STOP
-			)
 
 	def create_api_object(self) -> C4Blind:
 		"""Create a pyControl4 device object.
@@ -188,35 +234,34 @@ class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 	@property
 	def current_cover_position(self) -> int | None:  # type: ignore[override]
 		"""Get cover position."""
-		if not self._is_positional:
+		if not self._cover_model.is_stateful:
 			return None
-		p = self._extra_state_attributes.get("Level")
+		p = self._cover_model.get_position(self._extra_state_attributes)
 		if isinstance(p, str) and p.isdigit():
 			p = int(p)
 		if isinstance(p, int) and p >= _MIN_COVER_LEVEL and p <= _MAX_COVER_LEVEL:
 			return p
-		_LOGGER.exception("Got invalid position value from C4 %s", p)
 
 	@property
 	def is_closed(self) -> bool | None:  # type: ignore[override]
 		"""Is cover closed."""
-		if not self._is_positional:
+		if not self._cover_model.is_stateful:
 			return None
-		return self._extra_state_attributes.get("Fully Closed")
+		return self._cover_model.get_is_closed(self._extra_state_attributes)
 
 	@property
 	def is_closing(self) -> bool | None:  # type: ignore[override]
 		"""Is cover closing."""
-		if not self._is_positional:
+		if not self._cover_model.is_stateful:
 			return None
-		return self._extra_state_attributes.get("Closing")
+		return self._cover_model.get_is_closing(self._extra_state_attributes)
 
 	@property
 	def is_opening(self) -> bool | None:  # type: ignore[override]
 		"""Is cover opening."""
-		if not self._is_positional:
+		if not self._cover_model.is_stateful:
 			return None
-		return self._extra_state_attributes.get("Opening")
+		return self._cover_model.get_is_opening(self._extra_state_attributes)
 
 	async def async_open_cover(self, **kwargs: Any) -> None:
 		"""Open the cover."""
