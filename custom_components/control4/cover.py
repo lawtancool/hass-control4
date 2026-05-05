@@ -50,7 +50,7 @@ class Control4CoverModel:  # type: ignore[misc]
 		self,
 		cover_device_class: CoverDeviceClass | None = None,
 		is_stateful: bool = False,
-		fn_position: Callable[[dict[str, Any]], bool] | None = None,
+		fn_get_position: Callable[[dict[str, Any]], bool] | None = None,
 		fn_is_closed: Callable[[dict[str, Any]], bool] | None = None,
 		fn_is_closing: Callable[[dict[str, Any]], bool] | None = None,
 		fn_is_opening: Callable[[dict[str, Any]], bool] | None = None,
@@ -58,7 +58,7 @@ class Control4CoverModel:  # type: ignore[misc]
 	) -> None:
 		self.cover_device_class = cover_device_class
 		self.is_stateful = is_stateful if is_stateful is not None else False
-		self.fn_get_position = fn_position
+		self.fn_get_position = fn_get_position
 		self.fn_is_closed = fn_is_closed
 		self.fn_is_closing = fn_is_closing
 		self.fn_is_opening = fn_is_opening
