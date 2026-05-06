@@ -263,7 +263,7 @@ class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 		This exists so the director token used is always the latest one,
 		without needing to re-init the entire entity.
 		"""
-		return C4Gate(self.entry_data[CONF_DIRECTOR], self._idx)
+		return C4Gate(self.entry_data[CONF_DIRECTOR], self._device_id)
 
 	async def async_added_to_hass(self):
 		await super().async_added_to_hass()
