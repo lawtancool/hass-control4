@@ -305,7 +305,7 @@ class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 		if self._cover_model.is_gate():
 			c4_gate = self.create_gate_api_object()
 			await c4_gate.open()
-			return
+			return None
 		c4_blind = self.create_blind_api_object()
 		await c4_blind.open()
 
@@ -314,7 +314,7 @@ class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 		if self._cover_model.is_gate():
 			c4_gate = self.create_gate_api_object()
 			await c4_gate.close()
-			return
+			return None
 		c4_blind = self.create_blind_api_object()
 		await c4_blind.close()
 
@@ -335,7 +335,7 @@ class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 		if self._cover_model.is_gate():
 			c4_gate = self.create_gate_api_object()
 			await c4_gate.stop()
-			return
+			return None
 		c4_blind = self.create_blind_api_object()
 		await c4_blind.stop()
 
