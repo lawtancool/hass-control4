@@ -232,8 +232,6 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
 
     refresh_tokens_obj = RefreshTokensObject(hass, entry)
     resetting_client_session = C4ResettingClientSession(
-        hass,
-        entry,
         refresh_tokens_obj,
         no_verify_ssl_session
     )
@@ -571,7 +569,7 @@ class C4ResettingClientSession(aiohttp.ClientSession):
             raise CannotConnect("Control4 connection is in bad state, skipping request while token refresh is in progress")
 
         try:
-            result = await self._execute_with_timeout_tracking(self._underlying_session._request(*args, **kwargs))
+            result = await self._underlying_session._request(*args, **kwargs)
             # Reset successive timeout count on successful request
             await self._reset_timeout_count()
             return result
