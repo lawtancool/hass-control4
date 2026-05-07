@@ -3,7 +3,7 @@
   "name": "Control4",
   "config_flow": true,
   "documentation": "https://github.com/lawtancool/hass-control4",
-  "requirements": ["pyControl4==2.0.2", "aiohttp==3.13.5"],
+  "requirements": ["pyControl4==2.0.2"],
   "ssdp": [
     {
       "st": "c4:director"

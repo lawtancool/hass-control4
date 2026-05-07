@@ -9,6 +9,7 @@ from functools import cached_property
 from typing import Any
 import random
 
+import aiohttp
 from aiohttp import client_exceptions
 from custom_components.control4.config_flow import CannotConnect
 from pyControl4.account import C4Account
