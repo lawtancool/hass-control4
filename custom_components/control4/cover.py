@@ -67,6 +67,9 @@ class Control4CoverModel:  # type: ignore[misc]
 		self.fn_is_opening = fn_is_opening
 		self.supported_features = supported_features
 
+	def is_positional(self) -> bool:
+		return self.supported_features & CoverEntityFeature.SET_POSITION == CoverEntityFeature.SET_POSITION
+
 	def is_gate(self) -> bool:
 		return self.cover_device_class == CoverDeviceClass.GATE
 
@@ -320,7 +323,7 @@ class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 
 	async def async_set_cover_position(self, **kwargs: Any) -> None:
 		"""Set blind position."""
-		if not self._is_positional or self._cover_model.is_gate():
+		if not self._cover_model.is_positional():
 			return None
 		p = kwargs.get(ATTR_POSITION)
 		if not isinstance(p, int):
