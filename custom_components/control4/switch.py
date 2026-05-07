@@ -22,6 +22,7 @@ CONTROL4_RELAY_PROXY_TYPES = {
     "relaysingle_relay_c4": "Basic Relay",  # Generic relay that can be used for various purposes
     "cardaccess_wirelessrelay": "Wireless Relay",
     "relaysingle_electronicgate_c4": "Electronic Gate Relay",
+    "relaysingle_pump_c4": "Pump",  # Generic Pump driver (e.g. spa/pool pumps)
 }
 
 
