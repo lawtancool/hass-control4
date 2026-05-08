@@ -14,7 +14,7 @@ from aiohttp import client_exceptions
 from custom_components.control4.config_flow import CannotConnect
 from pyControl4.account import C4Account
 from pyControl4.director import C4Director
-from pyControl4.error_handling import BadCredentials, InvalidCategory
+from pyControl4.error_handling import BadCredentials, BadToken, InvalidCategory
 from pyControl4.websocket import C4Websocket
 
 from homeassistant.config_entries import ConfigEntry
@@ -280,6 +280,10 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
         "Registering next token refresh in %s seconds",
         delay,
     )
+
+    if CONF_CANCEL_TOKEN_REFRESH_CALLBACK in entry_data:
+        entry_data[CONF_CANCEL_TOKEN_REFRESH_CALLBACK].cancel()
+
     entry_data[CONF_CANCEL_TOKEN_REFRESH_CALLBACK] = async_call_later(
         hass=hass,
         delay=delay,
@@ -360,6 +364,8 @@ class RefreshTokensObject:
         # unused datetime parameter is required, since Home Assistant will pass a datetime.datetime object as parameter when calling this function via async_call_later()
         if await self._get_refreshing_lock():
             await self._refresh_token_with_retry()
+        else:
+            _LOGGER.warning("C4 token refresh already in progress, skipping additional refresh call")
 
     async def _refresh_token_with_retry(self, datetime):
         try:
@@ -373,6 +379,8 @@ class RefreshTokensObject:
         delay = random.uniform(0, min(2**self.retries, RETRY_BACKOFF_MAX_SEC))
         _LOGGER.warning("Token refresh failed, trying again in %s seconds", delay)
         entry_data = self.hass.data[DOMAIN][self.entry.entry_id]
+        if CONF_CANCEL_TOKEN_REFRESH_CALLBACK in entry_data:
+            entry_data[CONF_CANCEL_TOKEN_REFRESH_CALLBACK].cancel()
         entry_data[CONF_CANCEL_TOKEN_REFRESH_CALLBACK] = async_call_later(
             hass=self.hass,
             delay=delay,
@@ -555,10 +563,18 @@ class C4ResettingClientSession(aiohttp.ClientSession):
         self._lock = asyncio.Lock()
         self._connection_is_bad = False
 
-    async def _increment_timeout_count(self, num: int = 1) -> int:
+    async def _is_connection_bad_post_incr(self, num: int = 1) -> bool:
         async with self._lock:
+            if self._connection_is_bad:
+                return True
             self._successive_timeout_count += num
-            return self._successive_timeout_count
+            if self._successive_timeout_count == 5:
+                self._connection_is_bad = True
+            return self._connection_is_bad
+
+    async def _mark_connection_bad(self):
+        async with self._lock:
+            self._connection_is_bad = True
 
     async def _reset_timeout_count(self):
         async with self._lock:
@@ -573,16 +589,16 @@ class C4ResettingClientSession(aiohttp.ClientSession):
             # Reset successive timeout count on successful request
             await self._reset_timeout_count()
             return result
+        except BadToken:
+            await self._mark_connection_bad()
+            _LOGGER.warning("Received BadToken error from Control4, refreshing tokens.")
+            await self._refresh_tokens_obj.refresh_tokens(datetime.now())
+            raise
         except asyncio.TimeoutError:
-            timeout_count = await self._increment_timeout_count()
             # Proactively refresh tokens after 5 successive timeouts
             # These timeouts can occur when Control4 restarts, or when a token is prematurely expired.
             # We only refresh tokens on the exact count since the RefreshTokensObject will keep retrying until it succeeds.
-            if timeout_count == 5:
-                self._connection_is_bad = True
-                _LOGGER.warning(
-                    "Too many successive Control4 timeouts (%s). Resetting connection by refreshing tokens.",
-                    timeout_count,
-                )
+            if await self._is_connection_bad_post_incr():
+                _LOGGER.warning("Too many successive Control4 timeouts. Resetting connection by refreshing tokens.")
                 await self._refresh_tokens_obj.refresh_tokens(datetime.now())
             raise
