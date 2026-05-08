@@ -363,7 +363,7 @@ class RefreshTokensObject:
         """Call the refresh_tokens function to store updated authentication and director tokens in hass.data."""
         # unused datetime parameter is required, since Home Assistant will pass a datetime.datetime object as parameter when calling this function via async_call_later()
         if await self._get_refreshing_lock():
-            await self._refresh_token_with_retry()
+            await self._refresh_token_with_retry(datetime)
         else:
             _LOGGER.warning("C4 token refresh already in progress, skipping additional refresh call")
 
@@ -371,7 +371,7 @@ class RefreshTokensObject:
         try:
             await refresh_tokens(self.hass, self.entry)
         except ConfigEntryNotReady:
-            self._schedule_refresh_retry()
+            self._schedule_refresh_retry(datetime)
 
     def _schedule_refresh_retry(self):
         self.retries += 1
