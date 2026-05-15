@@ -233,7 +233,9 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
         hass, verify_ssl=False
     )
 
+    entry_data = hass.data[DOMAIN][entry.entry_id]
     refresh_tokens_obj = entry_data[CONF_REFRESH_TOKENS_SINGLETON]
+
     resetting_client_session = C4ResettingClientSession(
         refresh_tokens_obj,
         no_verify_ssl_session
@@ -244,7 +246,6 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
     )
 
     _LOGGER.debug("Saving new account and director tokens in hass data")
-    entry_data = hass.data[DOMAIN][entry.entry_id]
     entry_data[CONF_ACCOUNT] = account
     entry_data[CONF_DIRECTOR] = director
 
