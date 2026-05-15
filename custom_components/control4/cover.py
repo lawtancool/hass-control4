@@ -89,7 +89,7 @@ class Control4CoverModel:  # type: ignore[misc]
 		if self.fn_is_opening is not None:
 			return self.fn_is_opening(attributes)
 
-# Manufacturers and models that support level positionnig
+# Known manufacturers and models can be added here for more accurate device class and state handling.
 _KNOWN_COVER_MODELS = {
 	"blind_qmotion_qadvanced_roller_shade.c4z": Control4CoverModel(
 		cover_device_class	= CoverDeviceClass.SHADE,

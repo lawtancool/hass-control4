@@ -23,6 +23,7 @@ CONF_DIRECTOR_ALL_ITEMS = "director_all_items"
 CONF_CONTROLLER_UNIQUE_ID = "controller_unique_id"
 CONF_ALARM_ARM_STATES = "alarm_arm_states"
 CONF_UI_CONFIGURATION = "ui_configuration"
+CONF_REFRESH_TOKENS_SINGLETON = "refresh_tokens_singleton"
 
 DEFAULT_SCAN_INTERVAL = 5
 MIN_SCAN_INTERVAL = 1
