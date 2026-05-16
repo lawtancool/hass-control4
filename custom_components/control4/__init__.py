@@ -370,7 +370,7 @@ class RefreshTokensObject:
 
     def cancel_scheduled_refresh(self):
         if self._scheduled_token_refresh_delayed_task is not None:
-            self._scheduled_token_refresh_delayed_task.cancel()
+            self._scheduled_token_refresh_delayed_task()
             self._scheduled_token_refresh_delayed_task = None
 
     async def refresh_tokens(self, datetime):
@@ -404,7 +404,7 @@ class RefreshTokensObject:
         self.retries += 1
         # exponential backoff with jitter
         delay = random.uniform(0, min(2**self.retries, RETRY_BACKOFF_MAX_SEC))
-        _LOGGER.warning("Token refresh failed, trying again")
+        _LOGGER.warning("Token refresh failed, trying again in %s seconds", delay)
         self.schedule_refresh(delay, is_retry=True)
 
 
