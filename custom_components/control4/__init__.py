@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from functools import cached_property
+from collections.abc import Callable, Coroutine
 from typing import Any
 import random
 
@@ -62,6 +63,7 @@ from .const import (
     DEFAULT_ALARM_VACATION_MODE,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    REFRESH_TOKENS_COOLDOWN_SEC,
     RETRY_BACKOFF_MAX_SEC,
     SCHEDULE_REFRESH_ADVANCE_SEC,
 )
@@ -237,8 +239,8 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
     refresh_tokens_obj = entry_data[CONF_REFRESH_TOKENS_SINGLETON]
 
     resetting_client_session = C4ResettingClientSession(
-        refresh_tokens_obj,
-        no_verify_ssl_session
+        no_verify_ssl_session,
+        refresh_tokens_obj.refresh_tokens,
     )
 
     director = C4Director(
@@ -339,73 +341,61 @@ class RefreshTokensObject:
         self.hass = hass
         self.entry = entry
         self.retries = 0
-        self.session_id = 0
         self._refresh_lock = asyncio.Lock()
-        self._teardown_lock = asyncio.Lock()
-        self._refresh_triggered = False
         self._teardown_triggered = False
+        self._next_allowable_refresh_time = datetime.now()
         self._scheduled_token_refresh_delayed_task = None
 
     async def teardown(self):
         """Teardown function to be called on config entry unload to cancel any pending token refreshes and prevent memory leaks from multiple simultaneous refreshes."""
-        async with self._teardown_lock:
+        async with self._refresh_lock:
             self._teardown_triggered = True
-            self.cancel_scheduled_refresh()
+            self._cancel_scheduled_refresh()
 
-    def schedule_refresh(self, delay, is_retry=False):
+    def schedule_refresh(self, delay):
         """Schedule a token refresh by calling Home Assistant's async_call_later with the refresh_tokens function as callback."""
-        _LOGGER.debug(
-            "Registering next token refresh in %s seconds",
-            delay,
-        )
+        _LOGGER.debug("Registering next token refresh in %s seconds", delay)
 
-        self.cancel_scheduled_refresh()
+        self._cancel_scheduled_refresh()
 
-        callback = self.refresh_tokens if not is_retry else self._refresh_token_with_retry
         self._scheduled_token_refresh_delayed_task = async_call_later(
             hass=self.hass,
             delay=delay,
-            action=callback,
+            action=self.refresh_tokens,
         )
-
-    def cancel_scheduled_refresh(self):
-        if self._scheduled_token_refresh_delayed_task is not None:
-            self._scheduled_token_refresh_delayed_task()
-            self._scheduled_token_refresh_delayed_task = None
 
     async def refresh_tokens(self, datetime):
         """Call the refresh_tokens function to store updated authentication and director tokens in hass.data."""
         # unused datetime parameter is required, since Home Assistant will pass a datetime.datetime object as parameter when calling this function via async_call_later()
         async with self._refresh_lock:
-            if self._refresh_triggered:
-                # Only allow triggering refresh_tokens once, to prevent multiple simultaneous refreshes.
-                # This could occur when the token refresh timer callback is triggered while multiple entities also trigger a refresh due to receiving
-                # BadToken errors from Control4.
-                _LOGGER.warning("C4 token refresh already in progress, skipping additional refresh call")
-                return
-            self._refresh_triggered = True
-            await self._refresh_token_with_retry(datetime)
-
-    async def _refresh_token_with_retry(self, datetime):
-        async with self._teardown_lock:
             if self._teardown_triggered:
                 _LOGGER.warning("C4 config entry is unloading, skipping token refresh")
                 return
+            if self._next_allowable_refresh_time > datetime.now():
+                # Limit the frequency of token refreshes to avoid spamming the Control4 director with refresh requests in a short period of time.
+                _LOGGER.warning("C4 token refresh rate limited. Next allowable refresh time: %s", self._next_allowable_refresh_time)
+                return
+
             try:
-                self.session_id += 1 # Increment session id on successful refresh to allow pending requests from old sessions to be ignored
                 await refresh_tokens(self.hass, self.entry)
-                self._refresh_triggered = False # Reset triggered state on successful refresh
                 self.retries = 0 # Reset retry count on successful refresh
+                # On successful token refresh, delay the next allowable refresh time to avoid multiple simultaneous refresh attempts.
+                self._next_allowable_refresh_time = datetime.now() + timedelta(seconds=REFRESH_TOKENS_COOLDOWN_SEC)
             except ConfigEntryNotReady:
-                self.session_id -= 1 # Revert session id increment, since refresh was not successful
                 self._schedule_refresh_retry()
+
+    def _cancel_scheduled_refresh(self):
+        if self._scheduled_token_refresh_delayed_task is not None:
+            self._scheduled_token_refresh_delayed_task()
+            self._scheduled_token_refresh_delayed_task = None
 
     def _schedule_refresh_retry(self):
         self.retries += 1
         # exponential backoff with jitter
         delay = random.uniform(0, min(2**self.retries, RETRY_BACKOFF_MAX_SEC))
         _LOGGER.warning("Token refresh failed, trying again in %s seconds", delay)
-        self.schedule_refresh(delay, is_retry=True)
+        self.schedule_refresh(delay)
+        self._next_allowable_refresh_time = datetime.now() + timedelta(seconds=delay)
 
 
 class Control4Entity(Entity):
@@ -574,15 +564,14 @@ class C4ResettingClientSession(aiohttp.ClientSession):
     """Custom aiohttp ClientSession that can trigger a token refresh and temporarily stop making requests if too many timeouts occur."""
     def __init__(
         self,
-        refresh_tokens_obj: RefreshTokensObject,
         underlying_session: aiohttp.ClientSession,
+        on_bad_connection: Callable[[datetime], Coroutine[Any, Any, None] | None],
     ) -> None:
         self._underlying_session = underlying_session
-        self._refresh_tokens_obj = refresh_tokens_obj
+        self._on_bad_connection = on_bad_connection
         self._successive_timeout_count = 0
         self._lock = asyncio.Lock()
         self._connection_is_bad = False
-        self._session_id = refresh_tokens_obj.session_id # Capture session id to allow pending requests from old sessions to be ignored
 
     async def _reset_timeout_count(self):
         async with self._lock:
@@ -590,17 +579,12 @@ class C4ResettingClientSession(aiohttp.ClientSession):
 
     async def _try_trigger_token_refresh(self, is_timeout=False):
         async with self._lock:
-            if self._session_id != self._refresh_tokens_obj.session_id:
-                # A token refresh has already occurred since this request started, so skip triggering another refresh
-                self._connection_is_bad = True
-                return
-
             if is_timeout:
                 self._successive_timeout_count += 1
 
             if not self._connection_is_bad and (not is_timeout or self._successive_timeout_count >= 5):
                 _LOGGER.warning("Triggering token refresh due to detected bad Control4 connection")
-                await self._refresh_tokens_obj.refresh_tokens(datetime.now())
+                await self._on_bad_connection(datetime.now())
                 self._connection_is_bad = True
 
     async def _request(self, *args, **kwargs) -> aiohttp.ClientResponse:
