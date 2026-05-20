@@ -179,7 +179,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.debug("Disconnecting C4Websocket for config entry unload")
     await entry_data[CONF_WEBSOCKET].sio_disconnect()
     _LOGGER.debug("Cancelling scheduled token refresh for config entry unload")
-    entry_data[CONF_REFRESH_TOKENS_SINGLETON].teardown()
+    await entry_data[CONF_REFRESH_TOKENS_SINGLETON].teardown()
 
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
@@ -305,7 +305,7 @@ class C4WebsocketConnectionTracker:
         item_callbacks = self.hass.data[DOMAIN][self.entry.entry_id][
             CONF_WEBSOCKET
         ].item_callbacks
-        for item_id, callback in item_callbacks.items():
+        for item_id, callback_list in item_callbacks.items():
             item_attributes = await director_get_entry_variables(
                 self.hass, self.entry, item_id
             )
@@ -314,7 +314,8 @@ class C4WebsocketConnectionTracker:
                 "iddevice": item_id,
                 "data": item_attributes,
             }
-            await callback(item_id, message)
+            for callback in callback_list:
+                await callback(item_id, message)
 
         self._was_disconnected = False
 
@@ -329,8 +330,9 @@ class C4WebsocketConnectionTracker:
         item_callbacks = self.hass.data[DOMAIN][self.entry.entry_id][
             CONF_WEBSOCKET
         ].item_callbacks
-        for item_id, callback in item_callbacks.items():
-            await callback(item_id, False)
+        for item_id, callback_list in item_callbacks.items():
+            for callback in callback_list:
+                await callback(item_id, False)
 
 
 class RefreshTokensObject:
