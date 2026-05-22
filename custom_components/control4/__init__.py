@@ -431,17 +431,20 @@ class C4ClientSession(aiohttp.ClientSession):
         self._websocket.remove_item_callback(item_id, callback)
 
     async def connect_to_director(self) -> C4Director:
+        _LOGGER.info("Attempting to connect to Control4 with credentials")
         director_token_dict = await self._get_director_token_dict()
         director_bearer_token = director_token_dict[CONF_TOKEN]
         token_ttl_sec = director_token_dict["validSeconds"]
 
         director = C4Director(self.host, director_bearer_token, self._error_detecting_session)
-        
+
         _LOGGER.debug("Starting new WebSocket connection")
         try:
             await self._websocket.sio_connect(director_bearer_token)
         except Exception as exception:
             raise ConfigEntryNotReady(exception) from exception
+
+        _LOGGER.info("Connected to Control4!")
 
         # Schedule refresh 5mins before expiry, but no sooner than 5mins from now
         delay = max(
@@ -450,6 +453,7 @@ class C4ClientSession(aiohttp.ClientSession):
         )
         self._refresh_tokens_object.schedule_refresh(delay)
 
+        await self._connect_callback()
         if self._connect_to_director_callback is not None:
             self._connect_to_director_callback(director)
 
@@ -507,12 +511,16 @@ class C4ClientSession(aiohttp.ClientSession):
             if is_timeout:
                 self._successive_timeout_count += 1
 
-            if not self._connection_is_bad and (not is_timeout or self._successive_timeout_count >= 5):
+            if self._connection_is_bad or (is_timeout and self._successive_timeout_count < 5):
+                return
+            else:
                 _LOGGER.warning("Triggering token refresh due to detected bad Control4 connection")
                 self._connection_is_bad = True
                 self._error_detecting_session.connection_is_bad = True
                 await self._mark_entities_as_unavailable()
-                await self._refresh_tokens_object.refresh(datetime.now())
+
+        # This call needs to be made outside the lock to avoid recursive locking
+        await self._refresh_tokens_object.refresh(datetime.now())
 
     async def _mark_entities_as_available(self) -> None:
         # Refresh state of entities so they are not unavailable anymore
