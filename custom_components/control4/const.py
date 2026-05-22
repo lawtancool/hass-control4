@@ -15,15 +15,13 @@ DEFAULT_ALARM_VACATION_MODE = "(not set)"
 
 CONF_ACCOUNT = "account"
 CONF_DIRECTOR = "director"
-CONF_WEBSOCKET = "websocket"
-CONF_CANCEL_TOKEN_REFRESH_CALLBACK = "cancel_token_refresh_callback"
+CONF_C4_SESSION = "c4session"
 CONF_DIRECTOR_SW_VERSION = "director_sw_version"
 CONF_DIRECTOR_MODEL = "director_model"
 CONF_DIRECTOR_ALL_ITEMS = "director_all_items"
 CONF_CONTROLLER_UNIQUE_ID = "controller_unique_id"
 CONF_ALARM_ARM_STATES = "alarm_arm_states"
 CONF_UI_CONFIGURATION = "ui_configuration"
-CONF_REFRESH_TOKENS_SINGLETON = "refresh_tokens_singleton"
 
 DEFAULT_SCAN_INTERVAL = 5
 MIN_SCAN_INTERVAL = 1
