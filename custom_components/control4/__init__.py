@@ -61,7 +61,7 @@ from .const import (
     DEFAULT_ALARM_VACATION_MODE,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
-    REFRESH_TOKENS_COOLDOWN_SEC,
+    REFRESH_COOLDOWN_SEC,
     RETRY_BACKOFF_MAX_SEC,
     SCHEDULE_REFRESH_ADVANCE_SEC,
 )
@@ -95,13 +95,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         config[CONF_CONTROLLER_UNIQUE_ID],
         hass,
         entry,
+        lambda director: entry_data.__setitem__(CONF_DIRECTOR, director)
     )
     # Silence C4Websocket related loggers, that would otherwise spam INFO logs with debugging messages
     logging.getLogger("socketio.client").setLevel(logging.WARNING)
     logging.getLogger("engineio.client").setLevel(logging.WARNING)
     logging.getLogger("charset_normalizer").setLevel(logging.ERROR)
 
-    await refresh_tokens(hass, entry)
+    # This starts the connection to Control4 and will automatically reconnect if the connection is lost.
+    await entry_data[CONF_C4_SESSION].connect_to_director()
+
     # Copy controller unique id from config to entry_data for use by entities
     entry_data[CONF_CONTROLLER_UNIQUE_ID] = config[CONF_CONTROLLER_UNIQUE_ID]
 
@@ -185,6 +188,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
     entry_data = hass.data[DOMAIN][entry.entry_id]
+    # Shuts down the connection to Control4 and stops the re-connection loop.
     await entry_data[CONF_C4_SESSION].teardown()
 
     if unload_ok:
@@ -215,17 +219,6 @@ async def get_items_of_category(hass: HomeAssistant, entry: ConfigEntry, categor
             exc_info=True,
         )
         return []
-
-
-async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
-    """Store updated authentication and director tokens in hass.data, and schedule next token refresh."""
-    entry_data = hass.data[DOMAIN][entry.entry_id]
-
-    c4session = entry_data[CONF_C4_SESSION]
-    director = await c4session.connect_to_director()
-
-    _LOGGER.debug("Saving new director tokens in hass data")
-    entry_data[CONF_DIRECTOR] = director
 
 
 class Control4Entity(Entity):
@@ -399,6 +392,7 @@ class C4ClientSession(aiohttp.ClientSession):
         controller_unique_id: str,
         hass: HomeAssistant,
         entry: ConfigEntry,
+        connect_to_director_callback: Callable[[C4Director], Any] | None = None,
     ) -> None:
         self.hass = hass
         self.entry = entry
@@ -408,6 +402,8 @@ class C4ClientSession(aiohttp.ClientSession):
         self.account = C4Account(
             username, password, aiohttp_client.async_get_clientsession(hass)
         )
+
+        self._connect_to_director_callback = connect_to_director_callback
 
         self.host = entry.data[CONF_HOST]
         aiohttp_client_session = aiohttp_client.async_get_clientsession(hass, verify_ssl=False)
@@ -420,7 +416,7 @@ class C4ClientSession(aiohttp.ClientSession):
         self._successive_timeout_count = 0
         self._lock = asyncio.Lock()
         self._connection_is_bad = False
-        self._refresh_tokens_object = RefreshTokensObject(hass, entry)
+        self._refresh_tokens_object = RefreshObject(hass, self.connect_to_director)
         self._websocket = C4Websocket(
             self.host,
             aiohttp_client_session,
@@ -446,12 +442,17 @@ class C4ClientSession(aiohttp.ClientSession):
             await self._websocket.sio_connect(director_bearer_token)
         except Exception as exception:
             raise ConfigEntryNotReady(exception) from exception
+
         # Schedule refresh 5mins before expiry, but no sooner than 5mins from now
         delay = max(
             token_ttl_sec - SCHEDULE_REFRESH_ADVANCE_SEC,
             SCHEDULE_REFRESH_ADVANCE_SEC,
         )
         self._refresh_tokens_object.schedule_refresh(delay)
+
+        if self._connect_to_director_callback is not None:
+            self._connect_to_director_callback(director)
+
         return director
     
     async def teardown(self) -> None:
@@ -511,7 +512,7 @@ class C4ClientSession(aiohttp.ClientSession):
                 self._connection_is_bad = True
                 self._error_detecting_session.connection_is_bad = True
                 await self._mark_entities_as_unavailable()
-                await self._refresh_tokens_object.refresh_tokens(datetime.now())
+                await self._refresh_tokens_object.refresh(datetime.now())
 
     async def _mark_entities_as_available(self) -> None:
         # Refresh state of entities so they are not unavailable anymore
@@ -571,39 +572,42 @@ class ErrorDetectingClientSession(aiohttp.ClientSession):
             raise
 
 
-class RefreshTokensObject:
-    """Singleton object that provides a callable to refresh tokens."""
+class RefreshObject:
+    """Object that can trigger a refresh with incremental backoff."""
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        """Initialize a RefreshTokensObject by storing the HomeAssistant and ConfigEntry objects required to run refresh_tokens()."""
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        refresh_fn: Callable[[], Coroutine[Any, Any, None]],
+    ) -> None:
         self.hass = hass
-        self.entry = entry
+        self._refresh_fn = refresh_fn
         self.retries = 0
         self._refresh_lock = asyncio.Lock()
         self._teardown_triggered = False
         self._next_allowable_refresh_time = datetime.now()
-        self._scheduled_token_refresh_delayed_task = None
+        self._scheduled_refresh_delayed_task = None
 
     async def teardown(self) -> None:
-        """Teardown function to be called on config entry unload to cancel any pending token refreshes and prevent memory leaks from multiple simultaneous refreshes."""
+        """Teardown function to be called on config entry unload to cancel any pending refreshes and prevent memory leaks from multiple simultaneous refreshes."""
         async with self._refresh_lock:
             self._teardown_triggered = True
             self._cancel_scheduled_refresh()
 
     def schedule_refresh(self, delay: int) -> None:
-        """Schedule a token refresh by calling Home Assistant's async_call_later with the refresh_tokens function as callback."""
-        _LOGGER.debug("Registering next token refresh in %s seconds", delay)
+        """Schedule a refresh by calling Home Assistant's async_call_later with the refresh function as callback."""
+        _LOGGER.debug("Registering next refresh in %s seconds", delay)
 
         self._cancel_scheduled_refresh()
 
-        self._scheduled_token_refresh_delayed_task = async_call_later(
+        self._scheduled_refresh_delayed_task = async_call_later(
             hass=self.hass,
             delay=delay,
-            action=self.refresh_tokens,
+            action=self.refresh,
         )
 
-    async def refresh_tokens(self, datetime) -> None:
-        """Call the refresh_tokens function to store updated authentication and director tokens in hass.data."""
+    async def refresh(self, datetime) -> None:
+        """Trigger a refresh by calling the provided refresh function. This function is designed to be called by Home Assistant's async_call_later, which is why it accepts a datetime parameter that is not used."""
         # unused datetime parameter is required, since Home Assistant will pass a datetime.datetime object as parameter when calling this function via async_call_later()
         async with self._refresh_lock:
             if self._teardown_triggered:
@@ -615,17 +619,17 @@ class RefreshTokensObject:
                 return
 
             try:
-                await refresh_tokens(self.hass, self.entry)
+                await self._refresh_fn()
                 self.retries = 0 # Reset retry count on successful refresh
-                # On successful token refresh, delay the next allowable refresh time to avoid multiple simultaneous refresh attempts.
-                self._next_allowable_refresh_time = datetime.now() + timedelta(seconds=REFRESH_TOKENS_COOLDOWN_SEC)
+                # On successful refresh, delay the next allowable refresh time to avoid multiple simultaneous refresh attempts.
+                self._next_allowable_refresh_time = datetime.now() + timedelta(seconds=REFRESH_COOLDOWN_SEC)
             except ConfigEntryNotReady:
                 self._schedule_refresh_retry()
 
     def _cancel_scheduled_refresh(self) -> None:
-        if self._scheduled_token_refresh_delayed_task is not None:
-            self._scheduled_token_refresh_delayed_task()
-            self._scheduled_token_refresh_delayed_task = None
+        if self._scheduled_refresh_delayed_task is not None:
+            self._scheduled_refresh_delayed_task()
+            self._scheduled_refresh_delayed_task = None
 
     def _schedule_refresh_retry(self) -> None:
         self.retries += 1
