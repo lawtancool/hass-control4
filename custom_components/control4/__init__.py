@@ -40,7 +40,6 @@ from homeassistant.helpers.update_coordinator import (
 )
 
 from .const import (
-    CONF_ACCOUNT,
     CONF_ALARM_ARM_STATES,
     CONF_ALARM_AWAY_MODE,
     CONF_ALARM_CUSTOM_BYPASS_MODE,
@@ -89,7 +88,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry_data = hass.data[DOMAIN].setdefault(entry.entry_id, {})
     config = entry.data
 
-    entry_data[CONF_C4_SESSION] = C4ClientSession(hass, entry)
+    entry_data[CONF_C4_SESSION] = C4ClientSession(
+        config[CONF_HOST],
+        config[CONF_USERNAME],
+        config[CONF_PASSWORD],
+        config[CONF_CONTROLLER_UNIQUE_ID],
+        hass,
+        entry,
+    )
     # Silence C4Websocket related loggers, that would otherwise spam INFO logs with debugging messages
     logging.getLogger("socketio.client").setLevel(logging.WARNING)
     logging.getLogger("engineio.client").setLevel(logging.WARNING)
@@ -101,7 +107,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Add Control4 controller to device registry
     try:
-        controller_href = (await entry_data[CONF_ACCOUNT].get_account_controllers())[
+        controller_href = (await entry_data[CONF_C4_SESSION].account.get_account_controllers())[
             "href"
         ]
     except (client_exceptions.ClientError, asyncio.TimeoutError) as exception:
@@ -109,8 +115,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     try:
         entry_data[CONF_DIRECTOR_SW_VERSION] = await entry_data[
-            CONF_ACCOUNT
-        ].get_controller_os_version(controller_href)
+            CONF_C4_SESSION
+        ].account.get_controller_os_version(controller_href)
     except (client_exceptions.ClientError, asyncio.TimeoutError) as exception:
         raise ConfigEntryNotReady(exception) from exception
 
@@ -213,36 +219,12 @@ async def get_items_of_category(hass: HomeAssistant, entry: ConfigEntry, categor
 
 async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
     """Store updated authentication and director tokens in hass.data, and schedule next token refresh."""
-    config = entry.data
-    verify_ssl_session = aiohttp_client.async_get_clientsession(hass)
-
-    account = C4Account(
-        config[CONF_USERNAME], config[CONF_PASSWORD], verify_ssl_session
-    )
-    try:
-        await account.get_account_bearer_token()
-    except (client_exceptions.ClientError, asyncio.TimeoutError) as exception:
-        raise ConfigEntryNotReady(exception) from exception
-    except BadCredentials as exception:
-        raise ConfigEntryAuthFailed(exception) from exception
-
-    controller_unique_id = config[CONF_CONTROLLER_UNIQUE_ID]
-    try:
-        director_token_dict = await account.get_director_bearer_token(controller_unique_id)
-    except (client_exceptions.ClientError, asyncio.TimeoutError) as exception:
-        raise ConfigEntryNotReady(exception) from exception
-
     entry_data = hass.data[DOMAIN][entry.entry_id]
 
     c4session = entry_data[CONF_C4_SESSION]
-    director = await c4session.connect_to_director(
-        config[CONF_HOST],
-        director_token_dict[CONF_TOKEN],
-        director_token_dict["validSeconds"],
-    )
+    director = await c4session.connect_to_director()
 
-    _LOGGER.debug("Saving new account and director tokens in hass data")
-    entry_data[CONF_ACCOUNT] = account
+    _LOGGER.debug("Saving new director tokens in hass data")
     entry_data[CONF_DIRECTOR] = director
 
 
@@ -411,11 +393,22 @@ class Control4CoordinatorEntity(CoordinatorEntity[Any]):
 class C4ClientSession(aiohttp.ClientSession):
     def __init__(
         self,
+        host: str,
+        username: str,
+        password: str,
+        controller_unique_id: str,
         hass: HomeAssistant,
         entry: ConfigEntry,
     ) -> None:
         self.hass = hass
         self.entry = entry
+        self.host = host
+        self._controller_unique_id = controller_unique_id
+
+        self.account = C4Account(
+            username, password, aiohttp_client.async_get_clientsession(hass)
+        )
+
         self.host = entry.data[CONF_HOST]
         self._error_detecting_session = ErrorDetectingClientSession(
             aiohttp_client.async_get_clientsession(hass, verify_ssl=False),
@@ -439,9 +432,13 @@ class C4ClientSession(aiohttp.ClientSession):
 
     def remove_item_callback(self, item_id: int, callback: Callable[..., Any] | None = None) -> None:
         self._websocket.remove_item_callback(item_id, callback)
-    
-    async def connect_to_director(self, host: str, director_bearer_token: str, token_ttl_sec: int) -> C4Director:
-        director = C4Director(host, director_bearer_token, self._error_detecting_session)
+
+    async def connect_to_director(self) -> C4Director:
+        director_token_dict = await self._get_director_token_dict()
+        director_bearer_token = director_token_dict[CONF_TOKEN]
+        token_ttl_sec = director_token_dict["validSeconds"]
+
+        director = C4Director(self.host, director_bearer_token, self._error_detecting_session)
         
         _LOGGER.debug("Starting new WebSocket connection")
         try:
@@ -461,6 +458,22 @@ class C4ClientSession(aiohttp.ClientSession):
         await self._refresh_tokens_object.teardown()
         _LOGGER.debug("Disconnecting C4Websocket for config entry unload")
         await self._websocket.sio_disconnect()
+
+    async def _get_director_token_dict(self) -> dict:
+        """Get a director token using the stored account credentials, and trigger token refresh if a BadCredentials or ClientError exception is raised."""
+        try:
+            await self.account.get_account_bearer_token()
+        except (client_exceptions.ClientError, asyncio.TimeoutError) as exception:
+            raise ConfigEntryNotReady(exception) from exception
+        except BadCredentials as exception:
+            raise ConfigEntryAuthFailed(exception) from exception
+
+        try:
+            director_token_dict = await self.account.get_director_bearer_token(self._controller_unique_id)
+        except (client_exceptions.ClientError, asyncio.TimeoutError) as exception:
+            raise ConfigEntryNotReady(exception) from exception
+        
+        return director_token_dict
 
     async def _connect_callback(self) -> None:
         """Manually refresh entity states when the Websocket is reconnected after a connection drop."""

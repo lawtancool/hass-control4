@@ -13,7 +13,6 @@ DEFAULT_ALARM_CUSTOM_BYPASS_MODE = "(not set)"
 CONF_ALARM_VACATION_MODE = "alarm_vacation_mode"
 DEFAULT_ALARM_VACATION_MODE = "(not set)"
 
-CONF_ACCOUNT = "account"
 CONF_DIRECTOR = "director"
 CONF_C4_SESSION = "c4session"
 CONF_DIRECTOR_SW_VERSION = "director_sw_version"
