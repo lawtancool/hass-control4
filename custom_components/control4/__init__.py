@@ -410,8 +410,9 @@ class C4ClientSession(aiohttp.ClientSession):
         )
 
         self.host = entry.data[CONF_HOST]
+        aiohttp_client_session = aiohttp_client.async_get_clientsession(hass, verify_ssl=False)
         self._error_detecting_session = ErrorDetectingClientSession(
-            aiohttp_client.async_get_clientsession(hass, verify_ssl=False),
+            aiohttp_client_session,
             self._reset_timeout_count,
             self._try_trigger_token_refresh_for_timeout,
             self._try_trigger_token_refresh,
@@ -422,7 +423,7 @@ class C4ClientSession(aiohttp.ClientSession):
         self._refresh_tokens_object = RefreshTokensObject(hass, entry)
         self._websocket = C4Websocket(
             self.host,
-            self._underlying_session,
+            aiohttp_client_session,
             self._connect_callback,
             self._disconnect_callback,
         )
