@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from homeassistant.components.cover import (
@@ -43,7 +44,8 @@ _GARAGE_PARENT_MODEL = "1-3 relays"
 _GARAGE_STATE_VARIABLE = "STATE"
 _GARAGE_ICON_VARIABLE = "ICON"
 _GARAGE_ICON_DESCRIPTION_VARIABLE = "ICON_DESCRIPTION"
-_GARAGE_REFRESH_DELAYS = (1, 5, 15, 30, 60)
+_GARAGE_REFRESH_DELAYS = (5, 10, 20, 35, 60)
+_GARAGE_TRANSITION_TIMEOUT = 45
 
 
 async def async_setup_entry(
@@ -239,8 +241,25 @@ class Control4GarageCover(Control4Entity, CoverEntity):  # type: ignore[misc]
 		| CoverEntityFeature.STOP
 	)
 
+	def __init__(self, *args: Any, **kwargs: Any) -> None:
+		super().__init__(*args, **kwargs)
+		self._transition_state: str | None = None
+		self._transition_target_state: str | None = None
+		self._transition_deadline = 0.0
+
 	@property
 	def _garage_state(self) -> str:
+		state = self._resolved_garage_state()
+		if self._transition_state and self._transition_target_state:
+			if state == self._transition_target_state:
+				self._clear_transition()
+				return state
+			if time.monotonic() < self._transition_deadline:
+				return self._transition_state
+			self._clear_transition()
+		return state
+
+	def _resolved_garage_state(self) -> str:
 		state = self._normalized_attribute(
 			_GARAGE_STATE_VARIABLE,
 			_GARAGE_STATE_VARIABLE.lower(),
@@ -268,6 +287,11 @@ class Control4GarageCover(Control4Entity, CoverEntity):  # type: ignore[misc]
 			if value is not None:
 				return str(value).strip().lower().replace("_", " ")
 		return ""
+
+	def _clear_transition(self) -> None:
+		self._transition_state = None
+		self._transition_target_state = None
+		self._transition_deadline = 0.0
 
 	@property
 	def is_closed(self) -> bool | None:  # type: ignore[override]
@@ -324,6 +348,15 @@ class Control4GarageCover(Control4Entity, CoverEntity):  # type: ignore[misc]
 			"STOP": "stopped",
 		}.get(command)
 		if optimistic_state:
+			if command == "OPEN":
+				self._transition_target_state = "open"
+				self._transition_deadline = time.monotonic() + _GARAGE_TRANSITION_TIMEOUT
+			elif command == "CLOSE":
+				self._transition_target_state = "closed"
+				self._transition_deadline = time.monotonic() + _GARAGE_TRANSITION_TIMEOUT
+			else:
+				self._clear_transition()
+			self._transition_state = optimistic_state
 			self._extra_state_attributes[_GARAGE_STATE_VARIABLE] = optimistic_state
 			self.async_write_ha_state()
 		for delay in _GARAGE_REFRESH_DELAYS:
