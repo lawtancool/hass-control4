@@ -41,6 +41,9 @@ _GARAGE_PROXY = "uibutton"
 _GARAGE_PARENT_NAME = "relay garage door controller"
 _GARAGE_PARENT_MODEL = "1-3 relays"
 _GARAGE_STATE_VARIABLE = "STATE"
+_GARAGE_ICON_VARIABLE = "ICON"
+_GARAGE_ICON_DESCRIPTION_VARIABLE = "ICON_DESCRIPTION"
+_GARAGE_REFRESH_DELAYS = (1, 5, 15, 30, 60)
 
 
 async def async_setup_entry(
@@ -229,6 +232,7 @@ class Control4Cover(Control4Entity, CoverEntity):  # type: ignore[misc]
 class Control4GarageCover(Control4Entity, CoverEntity):  # type: ignore[misc]
 	"""Control4 garage door exposed through a uibutton relay driver."""
 	_attr_device_class = CoverDeviceClass.GARAGE
+	_attr_should_poll = True
 	_attr_supported_features = (
 		CoverEntityFeature.OPEN
 		| CoverEntityFeature.CLOSE
@@ -237,10 +241,33 @@ class Control4GarageCover(Control4Entity, CoverEntity):  # type: ignore[misc]
 
 	@property
 	def _garage_state(self) -> str:
-		value = self._extra_state_attributes.get(_GARAGE_STATE_VARIABLE)
-		if value is None:
-			value = self._extra_state_attributes.get(_GARAGE_STATE_VARIABLE.lower())
-		return str(value or "").strip().lower()
+		state = self._normalized_attribute(
+			_GARAGE_STATE_VARIABLE,
+			_GARAGE_STATE_VARIABLE.lower(),
+		)
+		if state in {"opening", "closing"}:
+			return state
+
+		icon_state = self._normalized_attribute(
+			_GARAGE_ICON_DESCRIPTION_VARIABLE,
+			_GARAGE_ICON_DESCRIPTION_VARIABLE.lower(),
+			"icon_description",
+			_GARAGE_ICON_VARIABLE,
+			_GARAGE_ICON_VARIABLE.lower(),
+		)
+		if "closed" in icon_state:
+			return "closed"
+		if "open" in icon_state:
+			return "open"
+
+		return state
+
+	def _normalized_attribute(self, *keys: str) -> str:
+		for key in keys:
+			value = self._extra_state_attributes.get(key)
+			if value is not None:
+				return str(value).strip().lower().replace("_", " ")
+		return ""
 
 	@property
 	def is_closed(self) -> bool | None:  # type: ignore[override]
@@ -262,6 +289,28 @@ class Control4GarageCover(Control4Entity, CoverEntity):  # type: ignore[misc]
 		"""Return whether the garage door is closing."""
 		return self._garage_state == "closing"
 
+	async def async_update(self) -> None:
+		"""Poll the parent relay driver for the latest garage state."""
+		await self._refresh_garage_state(write_state=False)
+
+	async def _refresh_garage_state(self, *, write_state: bool = True) -> None:
+		attrs = await director_get_entry_variables(self.hass, self.entry, self._device_id)
+		if _GARAGE_STATE_VARIABLE not in attrs:
+			attrs.update(
+				await director_get_entry_variables(self.hass, self.entry, self._idx)
+			)
+		self._attr_available = True
+		self._extra_state_attributes.update(attrs)
+		if write_state:
+			self.async_write_ha_state()
+
+	async def _refresh_garage_state_after_delay(self, delay: int) -> None:
+		await asyncio.sleep(delay)
+		try:
+			await self._refresh_garage_state()
+		except Exception as err:  # noqa: BLE001
+			_LOGGER.debug("Unable to refresh Control4 garage state: %s", err)
+
 	async def _send_garage_command(self, command: str) -> None:
 		director = self.entry_data[CONF_DIRECTOR]
 		await director.send_post_request(
@@ -269,15 +318,16 @@ class Control4GarageCover(Control4Entity, CoverEntity):  # type: ignore[misc]
 			command,
 			{},
 		)
-		await asyncio.sleep(1)
-		try:
-			self._extra_state_attributes.update(
-				await director_get_entry_variables(
-					self.hass, self.entry, self._device_id
-				)
-			)
-		except Exception as err:  # noqa: BLE001
-			_LOGGER.debug("Unable to refresh Control4 garage state: %s", err)
+		optimistic_state = {
+			"OPEN": "opening",
+			"CLOSE": "closing",
+			"STOP": "stopped",
+		}.get(command)
+		if optimistic_state:
+			self._extra_state_attributes[_GARAGE_STATE_VARIABLE] = optimistic_state
+			self.async_write_ha_state()
+		for delay in _GARAGE_REFRESH_DELAYS:
+			self.hass.async_create_task(self._refresh_garage_state_after_delay(delay))
 
 	async def _data_to_extra_state_attributes(self, data) -> None:
 		"""Load garage state from websocket update data."""
