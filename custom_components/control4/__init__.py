@@ -478,7 +478,7 @@ class C4ClientSession(aiohttp.ClientSession):
             director_token_dict = await self.account.get_director_bearer_token(self._controller_unique_id)
         except (client_exceptions.ClientError, asyncio.TimeoutError) as exception:
             raise ConfigEntryNotReady(exception) from exception
-        
+
         return director_token_dict
 
     async def _connect_callback(self) -> None:
@@ -488,9 +488,9 @@ class C4ClientSession(aiohttp.ClientSession):
                 return
 
             _LOGGER.info("Websocket connection to Control4 reestablished")
-            await self._mark_entities_as_available()
             self._connection_is_bad = False
             self._error_detecting_session.connection_is_bad = False
+            await self._mark_entities_as_available()
 
     async def _disconnect_callback(self) -> None:
         """Detect a Websocket connection loss."""
