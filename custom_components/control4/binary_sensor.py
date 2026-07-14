@@ -237,15 +237,25 @@ class Control4BinarySensor(Control4Entity, BinarySensorEntity):  # type: ignore[
                 await self._data_to_extra_state_attributes(data["contact_state"])
 
             if "relay_state" in data:
-                # For garage door sensors, use relay_state instead of contact_state
-                self._extra_state_attributes["ContactState"] = bool(
-                    data["relay_state"].pop("current_state") == "CLOSED"
-                )
-                self._extra_state_attributes["StateVerified"] = data["relay_state"].pop(
-                    "is_verified"
-                )
+                # For garage door sensors, use relay_state instead of contact_state.
+                # Copy first — cover entities for the same item also read this dict.
+                relay_state = dict(data["relay_state"])
+                current = relay_state.get("current_state")
+                if current is not None:
+                    self._extra_state_attributes["ContactState"] = bool(
+                        current == "CLOSED"
+                    )
+                verified = relay_state.get("is_verified")
+                if verified is not None:
+                    self._extra_state_attributes["StateVerified"] = verified
                 self._extra_state_attributes["LastActionTime"] = message["time"]
-                await self._data_to_extra_state_attributes(data["relay_state"])
+                await self._data_to_extra_state_attributes(
+                    {
+                        k: v
+                        for k, v in relay_state.items()
+                        if k not in ("current_state", "is_verified")
+                    }
+                )
 
         _LOGGER.debug("Updated state for %s: %s", self.name, self._extra_state_attributes)
         self.async_write_ha_state()

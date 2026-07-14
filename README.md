@@ -1,10 +1,12 @@
 # hass-control4
 
-This custom integration for Home Assistant allows control of Control4 lights, locks (only locks that are relay-based in Control4), alarm control panels, door/window/motion sensors (as binary sensors), thermostats, fans, relay devices (as switches), and blinds/shades (as covers, stateless open/close/stop).
+This custom integration for Home Assistant allows control of Control4 lights, locks (only locks that are relay-based in Control4), alarm control panels, door/window/motion sensors (as binary sensors), thermostats, fans, relay devices (as switches), blinds/shades (as covers, stateless open/close/stop), and garage doors (`relaycontact_garagedoor_c4` as garage covers with open/close and closed-state from `RelayState`).
+
+Garage doors that use the Control4 `relaycontact_garagedoor_c4` proxy are exposed as `cover` entities (`device_class: garage`). The same items continue to appear as `binary_sensor` garage-door entities; both are intentional.
 
 ## Installation
 
-First, add this repository as a [custom repository](https://www.hacs.xyz/docs/faq/custom_repositories/) in HACS. 
+First, add this repository as a [custom repository](https://www.hacs.xyz/docs/faq/custom_repositories/) in HACS.
 
 Then, you can use the link below to install the integration through HACS:
 
