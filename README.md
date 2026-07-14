@@ -12,11 +12,18 @@ Then, you can use the link below to install the integration through HACS:
 
 Once installed, follow the same setup instructions as the default integration: https://www.home-assistant.io/integrations/control4
 
-### Additional configuration required for alarm control panel
+### Alarm control panel
 
-If you are using an alarm control panel, you must go to Home Assistant -> Configuration -> Devices and Services -> Integrations and click "Configure" on the Control4 entry.
+Arm types are discovered from Control4 (`arm_types` / `arm_states` capabilities and `C4SecurityPanel.get_arm_types()`). On first load, Stay/Away (and other common modes) are auto-mapped to Home Assistant arm home/away when options are still `(not set)`.
 
-In the dialog that appears, choose the Control4 alarm arming modes that you want to correspond to each Home Assistant arming mode. For example, a DSC alarm system uses "Stay" as the "Alarm arm home mode name", and "Away" as the "Alarm arm away mode name". If your alarm system does not use one of the mode names, select `(not set)`. Once you click submit on the dialog, Home Assistant will be able to arm your alarm control panel and detect its state.
+Use **Security System** (the partition with `PARTITION_STATE`) as the primary entity. The companion **Security Panel** UI item is disabled by default when it is not a usable partition.
+
+Entity services:
+
+- `control4.send_alarm_keystrokes` — virtual keypad keystrokes
+- `control4.trigger_emergency` — Fire, Medical, Panic, or Police (when supported)
+
+You can still adjust mode mapping under **Configure** on the Control4 integration entry.
 
 ## Disclaimer
 

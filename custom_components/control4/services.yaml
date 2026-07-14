@@ -7,3 +7,13 @@ send_alarm_keystrokes:
     keystrokes:
       description: String of keystrokes.
       example: "*101#"
+
+trigger_emergency:
+  description: Triggers a specific emergency on a Control4 alarm control panel.
+  fields:
+    entity_id:
+      description: Name(s) of the alarm control panel entities.
+      example: "alarm_control_panel.security_system"
+    emergency_type:
+      description: Emergency type supported by the panel (Fire, Medical, Panic, or Police).
+      example: "Fire"

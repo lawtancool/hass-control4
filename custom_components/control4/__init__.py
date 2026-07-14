@@ -62,6 +62,7 @@ from .const import (
     SCHEDULE_REFRESH_ADVANCE_SEC,
 )
 from .director_utils import director_get_entry_variables
+from .alarm_utils import apply_auto_mapped_modes, async_discover_alarm_arm_types
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -155,6 +156,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         DEFAULT_ALARM_CUSTOM_BYPASS_MODE,
         DEFAULT_ALARM_VACATION_MODE,
     }
+
+    discovered_arm_types = await async_discover_alarm_arm_types(hass, entry, entry_data)
+    new_alarm_options = apply_auto_mapped_modes(
+        entry.options, entry_data, discovered_arm_types
+    )
+    if new_alarm_options is not None:
+        hass.config_entries.async_update_entry(entry, options=new_alarm_options)
+        _LOGGER.info(
+            "Auto-mapped Control4 alarm arm modes: away=%s home=%s",
+            entry_data.get(CONF_ALARM_AWAY_MODE),
+            entry_data.get(CONF_ALARM_HOME_MODE),
+        )
 
     entry_data[CONF_CONFIG_LISTENER] = entry.add_update_listener(update_listener)
 
