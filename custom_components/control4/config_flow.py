@@ -26,6 +26,7 @@ from .const import (
     CONF_ALARM_HOME_MODE,
     CONF_ALARM_NIGHT_MODE,
     CONF_ALARM_VACATION_MODE,
+    CONF_CLIMATE_SCHEDULE_PRESETS,
     CONF_CONTROLLER_UNIQUE_ID,
     DEFAULT_ALARM_AWAY_MODE,
     DEFAULT_ALARM_CUSTOM_BYPASS_MODE,
@@ -35,6 +36,8 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     MIN_SCAN_INTERVAL,
+    default_climate_schedule_presets_csv,
+    parse_climate_schedule_presets,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -204,7 +207,14 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """Handle options flow."""
         if user_input is not None:
             _LOGGER.debug(user_input)
-            return self.async_create_entry(title="", data=user_input)
+            cleaned = dict(user_input)
+            raw_presets = cleaned.get(CONF_CLIMATE_SCHEDULE_PRESETS)
+            cleaned[CONF_CLIMATE_SCHEDULE_PRESETS] = ", ".join(
+                parse_climate_schedule_presets(
+                    raw_presets if isinstance(raw_presets, str) else None
+                )
+            )
+            return self.async_create_entry(title="", data=cleaned)
 
         # TODO: figure out how to accept empty strings to disable modes
         # TODO: figure out how to only show alarm options if a alarm_control_panel entity exists
@@ -219,6 +229,15 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         has_security = any(
             x.strip() and x.strip() != DEFAULT_ALARM_AWAY_MODE for x in arm_state_choices
         )
+
+        climate_presets_default = self._config_entry.options.get(
+            CONF_CLIMATE_SCHEDULE_PRESETS, default_climate_schedule_presets_csv()
+        )
+        if (
+            not isinstance(climate_presets_default, str)
+            or not climate_presets_default.strip()
+        ):
+            climate_presets_default = default_climate_schedule_presets_csv()
 
         # Always include scan interval; include alarm options only if we have a panel
         if has_security:
@@ -260,6 +279,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                             CONF_ALARM_VACATION_MODE, DEFAULT_ALARM_VACATION_MODE
                         ),
                     ): vol.In(sorted(arm_state_choices)),
+                    vol.Optional(
+                        CONF_CLIMATE_SCHEDULE_PRESETS,
+                        default=climate_presets_default,
+                    ): str,
                 },
                 required=False,
             )
@@ -272,6 +295,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
                         ),
                     ): vol.All(cv.positive_int, vol.Clamp(min=MIN_SCAN_INTERVAL)),
+                    vol.Optional(
+                        CONF_CLIMATE_SCHEDULE_PRESETS,
+                        default=climate_presets_default,
+                    ): str,
                 },
                 required=False,
             )
