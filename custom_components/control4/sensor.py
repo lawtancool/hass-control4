@@ -61,6 +61,10 @@ SENSORS: list[_SensorMap] = [
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
+    from .custom_variable import async_setup_entry as setup_custom_variables
+
+    await setup_custom_variables(hass, entry, async_add_entities)
+
     entry_data = hass.data[DOMAIN][entry.entry_id]
 
     director_all_items = entry_data[CONF_DIRECTOR_ALL_ITEMS]

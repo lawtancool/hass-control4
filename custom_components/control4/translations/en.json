@@ -28,7 +28,27 @@
             "alarm_away_mode": "Alarm arm away mode name",
             "alarm_night_mode": "Alarm arm night mode name",
             "alarm_custom_bypass_mode": "Alarm arm custom bypass mode name",
-            "alarm_vacation_mode": "Alarm arm vacation mode name"
+            "alarm_vacation_mode": "Alarm arm vacation mode name",
+            "custom_var_1_name": "Custom variable 1 name",
+            "custom_var_2_name": "Custom variable 2 name",
+            "custom_var_3_name": "Custom variable 3 name",
+            "custom_var_4_name": "Custom variable 4 name",
+            "custom_var_5_name": "Custom variable 5 name",
+            "custom_var_6_name": "Custom variable 6 name",
+            "custom_var_7_name": "Custom variable 7 name",
+            "custom_var_8_name": "Custom variable 8 name",
+            "custom_var_9_name": "Custom variable 9 name",
+            "custom_var_10_name": "Custom variable 10 name",
+            "macro_1_name": "Macro 1 name",
+            "macro_2_name": "Macro 2 name",
+            "macro_3_name": "Macro 3 name",
+            "macro_4_name": "Macro 4 name",
+            "macro_5_name": "Macro 5 name",
+            "macro_6_name": "Macro 6 name",
+            "macro_7_name": "Macro 7 name",
+            "macro_8_name": "Macro 8 name",
+            "macro_9_name": "Macro 9 name",
+            "macro_10_name": "Macro 10 name"
           }
         }
       }

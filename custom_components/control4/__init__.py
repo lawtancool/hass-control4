@@ -23,7 +23,19 @@ from homeassistant.const import (
     Platform,
     CONF_SCAN_INTERVAL,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.exceptions import ConfigEntryNotFound, HomeAssistantError
+from homeassistant.helpers import config_validation as cv
+import voluptuous as vol
+
+from .agents import (
+    execute_macro,
+    find_macros_agent_id,
+    find_variables_agent_id,
+    list_macros,
+    macros_by_name,
+    read_custom_variable,
+)
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client, device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -49,6 +61,8 @@ from .const import (
     CONF_DIRECTOR_ALL_ITEMS,
     CONF_DIRECTOR_MODEL,
     CONF_DIRECTOR_SW_VERSION,
+    CONF_MACROS_AGENT_ID,
+    CONF_VARIABLES_AGENT_ID,
     CONF_WEBSOCKET,
     CONF_UI_CONFIGURATION,
     DEFAULT_ALARM_AWAY_MODE,
@@ -65,6 +79,9 @@ from .director_utils import director_get_entry_variables
 
 _LOGGER = logging.getLogger(__name__)
 
+SERVICE_EXECUTE_MACRO = "execute_macro"
+SERVICE_READ_CUSTOM_VARIABLE = "read_custom_variable"
+
 PLATFORMS = [
     Platform.LIGHT,
     Platform.ALARM_CONTROL_PANEL,
@@ -76,7 +93,90 @@ PLATFORMS = [
     Platform.FAN,
     Platform.CLIMATE,
     Platform.COVER,
+    Platform.BUTTON,
 ]
+
+
+def _entry_for_service(hass: HomeAssistant, call: ServiceCall) -> ConfigEntry:
+    """Resolve the config entry targeted by a service call."""
+    entry_id = call.data.get("config_entry_id")
+    entries = hass.config_entries.async_entries(DOMAIN)
+    if entry_id:
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry is None or entry.domain != DOMAIN:
+            raise ConfigEntryNotFound(f"Config entry {entry_id} not found")
+        return entry
+    if len(entries) == 1:
+        return entries[0]
+    raise HomeAssistantError(
+        "Multiple Control4 config entries; specify config_entry_id in the service call"
+    )
+
+
+async def _handle_execute_macro(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Execute a Composer macro by name."""
+    entry = _entry_for_service(hass, call)
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    macros_agent_id = entry_data.get(CONF_MACROS_AGENT_ID)
+    if macros_agent_id is None:
+        raise HomeAssistantError("Control4 Macros agent not found on this director")
+
+    macro_name = call.data["macro_name"]
+    macro = macros_by_name(
+        await list_macros(entry_data[CONF_DIRECTOR])
+    ).get(macro_name)
+    if macro is None:
+        raise HomeAssistantError(f"Composer macro {macro_name!r} not found")
+
+    await execute_macro(
+        entry_data[CONF_DIRECTOR], macros_agent_id, int(macro["id"])
+    )
+
+
+async def _handle_read_custom_variable(hass: HomeAssistant, call: ServiceCall) -> dict:
+    """Read a Composer custom variable."""
+    entry = _entry_for_service(hass, call)
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    variables_agent_id = entry_data.get(CONF_VARIABLES_AGENT_ID)
+    if variables_agent_id is None:
+        raise HomeAssistantError("Control4 Variables agent not found on this director")
+
+    var_name = call.data["variable_name"]
+    value = await read_custom_variable(
+        entry_data[CONF_DIRECTOR], variables_agent_id, var_name
+    )
+    return {"value": value}
+
+
+async def _async_register_services(hass: HomeAssistant) -> None:
+    """Register domain services once."""
+    if hass.services.has_service(DOMAIN, SERVICE_EXECUTE_MACRO):
+        return
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_EXECUTE_MACRO,
+        lambda call: _handle_execute_macro(hass, call),
+        schema=vol.Schema(
+            {
+                vol.Required("macro_name"): cv.string,
+                vol.Optional("config_entry_id"): cv.string,
+            }
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_READ_CUSTOM_VARIABLE,
+        lambda call: _handle_read_custom_variable(hass, call),
+        schema=vol.Schema(
+            {
+                vol.Required("variable_name"): cv.string,
+                vol.Optional("config_entry_id"): cv.string,
+            }
+        ),
+        supports_response=SupportsResponse.ONLY,
+    )
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Control4 from a config entry."""
@@ -123,6 +223,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except (client_exceptions.ClientError, asyncio.TimeoutError) as exception:
         raise ConfigEntryNotReady(exception) from exception
     entry_data[CONF_DIRECTOR_ALL_ITEMS] = director_all_items
+    entry_data[CONF_VARIABLES_AGENT_ID] = find_variables_agent_id(director_all_items)
+    entry_data[CONF_MACROS_AGENT_ID] = find_macros_agent_id(director_all_items)
 
     entry_data[CONF_UI_CONFIGURATION] = await entry_data[CONF_DIRECTOR].get_ui_configuration()
 
@@ -158,6 +260,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entry_data[CONF_CONFIG_LISTENER] = entry.add_update_listener(update_listener)
 
+    await _async_register_services(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True

@@ -24,6 +24,17 @@ CONF_CONTROLLER_UNIQUE_ID = "controller_unique_id"
 CONF_ALARM_ARM_STATES = "alarm_arm_states"
 CONF_UI_CONFIGURATION = "ui_configuration"
 
+CONF_VARIABLES_AGENT_ID = "variables_agent_id"
+CONF_MACROS_AGENT_ID = "macros_agent_id"
+
+CUSTOM_VAR_SLOT_COUNT = 10
+CONF_CUSTOM_VAR_NAME_KEYS = tuple(
+    f"custom_var_{i}_name" for i in range(1, CUSTOM_VAR_SLOT_COUNT + 1)
+)
+
+MACRO_SLOT_COUNT = 10
+CONF_MACRO_NAME_KEYS = tuple(f"macro_{i}_name" for i in range(1, MACRO_SLOT_COUNT + 1))
+
 DEFAULT_SCAN_INTERVAL = 5
 MIN_SCAN_INTERVAL = 1
 
