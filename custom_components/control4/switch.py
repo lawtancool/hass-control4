@@ -14,6 +14,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from . import Control4Entity
 from .const import CONF_DIRECTOR, CONF_DIRECTOR_ALL_ITEMS, CONTROL4_ENTITY_TYPE, DOMAIN
 from .director_utils import director_get_entry_variables
+from .pool import async_setup_pool_switches
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -80,7 +81,10 @@ async def async_setup_entry(
                 )
             )
 
-    async_add_entities(entity_list, True)
+    if entity_list:
+        async_add_entities(entity_list, True)
+
+    await async_setup_pool_switches(hass, entry, async_add_entities)
 
 
 class Control4Switch(Control4Entity, SwitchEntity):

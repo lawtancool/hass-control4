@@ -71,6 +71,7 @@ PLATFORMS = [
     Platform.BINARY_SENSOR,
     Platform.LOCK,
     Platform.MEDIA_PLAYER,
+    Platform.NUMBER,
     Platform.SENSOR,
     Platform.SWITCH,
     Platform.FAN,
