@@ -22,7 +22,7 @@ In the dialog that appears, choose the Control4 alarm arming modes that you want
 
 Composer **custom variables** (Variables agent) and **macros** (Macros agent) can be exposed in Home Assistant without creating device drivers for each one.
 
-**Custom variables** become `sensor` entities (polled on the media-player scan interval). Names must match Composer exactly (case-sensitive), for example `DebugInt1` or `GateHoldOpen`. The Director REST API supports **read**; there is no generic write endpoint for custom variables today.
+**Custom variables** become `sensor` entities updated over the Control4 WebSocket (`OnDataToUI` on the Variables agent), same as lights and thermostats — not polled. Names must match Composer exactly (case-sensitive), for example `DebugInt1` or `GateHoldOpen`. The Director REST API supports **read**; there is no generic write endpoint for custom variables today.
 
 **Macros** become `button` entities and can also be triggered with the `control4.execute_macro` service. Macro names must match Composer exactly, for example `AllOff`.
 
