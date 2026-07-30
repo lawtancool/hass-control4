@@ -31,13 +31,19 @@
   "options": {
     "step": {
       "init": {
+        "description": "Name each pool/spa auxiliary circuit you want in Home Assistant (Control4 aux IDs 1-5). Leave a slot blank to skip it. See README Pool / spa auxiliaries.",
         "data": {
           "scan_interval": "Seconds between updates (media player only)",
           "alarm_home_mode": "Alarm arm home mode name",
           "alarm_away_mode": "Alarm arm away mode name",
           "alarm_night_mode": "Alarm arm night mode name",
           "alarm_custom_bypass_mode": "Alarm arm custom bypass mode name",
-          "alarm_vacation_mode": "Alarm arm vacation mode name"
+          "alarm_vacation_mode": "Alarm arm vacation mode name",
+          "pool_aux_1_name": "Pool aux 1 name (blank = unused)",
+          "pool_aux_2_name": "Pool aux 2 name (blank = unused)",
+          "pool_aux_3_name": "Pool aux 3 name (blank = unused)",
+          "pool_aux_4_name": "Pool aux 4 name (blank = unused)",
+          "pool_aux_5_name": "Pool aux 5 name (blank = unused)"
         }
       }
     }

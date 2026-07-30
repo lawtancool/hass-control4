@@ -31,6 +31,7 @@ from pyControl4.climate import C4Climate
 from . import Control4Entity, get_items_of_category
 from .const import CONF_DIRECTOR, CONTROL4_ENTITY_TYPE, DOMAIN
 from .director_utils import director_get_entry_variables
+from .pool import async_setup_pool_climates
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -167,6 +168,8 @@ async def async_setup_entry(
         )
 
     async_add_entities(entity_list, True)
+
+    await async_setup_pool_climates(hass, entry, async_add_entities)
 
 
 class Control4Climate(Control4Entity, ClimateEntity):  # type: ignore[misc]
