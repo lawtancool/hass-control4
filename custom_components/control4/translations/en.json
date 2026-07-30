@@ -22,13 +22,15 @@
     "options": {
       "step": {
         "init": {
+          "description": "Climate schedule presets are a comma-separated list of Control4 activity names (exact spelling/casing).",
           "data": {
             "scan_interval": "Seconds between updates (media player only)",
             "alarm_home_mode": "Alarm arm home mode name",
             "alarm_away_mode": "Alarm arm away mode name",
             "alarm_night_mode": "Alarm arm night mode name",
             "alarm_custom_bypass_mode": "Alarm arm custom bypass mode name",
-            "alarm_vacation_mode": "Alarm arm vacation mode name"
+            "alarm_vacation_mode": "Alarm arm vacation mode name",
+            "climate_schedule_presets": "Climate schedule presets (comma-separated)"
           }
         }
       }

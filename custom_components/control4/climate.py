@@ -29,7 +29,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from pyControl4.climate import C4Climate
 
 from . import Control4Entity, get_items_of_category
-from .const import CONF_DIRECTOR, CONTROL4_ENTITY_TYPE, DOMAIN
+from .const import (
+    CONF_CLIMATE_SCHEDULE_PRESETS,
+    CONF_DIRECTOR,
+    CONTROL4_ENTITY_TYPE,
+    DOMAIN,
+    parse_climate_schedule_presets,
+)
 from .director_utils import director_get_entry_variables
 
 _LOGGER = logging.getLogger(__name__)
@@ -75,6 +81,13 @@ FAN_MODES = {
     CONTROL4_FAN_MODE_DIFFUSE: FAN_DIFFUSE,
 }
 
+# Combined HA climate.preset_mode values.
+# Control4 has orthogonal schedule presets (SET_PRESET) and hold (SET_MODE_HOLD);
+# HA only exposes one preset_mode, so they are merged here.
+PRESET_HOLD = "Hold"
+CONTROL4_HOLD_OFF = "Off"
+CONTROL4_HOLD_PERMANENT = "Permanent"
+
 # Attribute name constants
 ATTR_HUMIDITY = "HUMIDITY"
 ATTR_TEMPERATURE_F = "TEMPERATURE_F"
@@ -87,6 +100,8 @@ ATTR_HVAC_MODE = "HVAC_MODE"
 ATTR_HVAC_MODES_LIST = "HVAC_MODES_LIST"
 ATTR_HOLD_MODE = "HOLD_MODE"
 ATTR_HOLD_MODES_LIST = "HOLD_MODES_LIST"
+ATTR_PRESET = "PRESET"
+ATTR_PRESETS_LIST = "PRESETS_LIST"
 ATTR_SETPOINT_HEAT_F = "SETPOINT_HEAT_F"
 ATTR_HEAT_SETPOINT_F = "HEAT_SETPOINT_F"
 ATTR_SETPOINT_HEAT_C = "SETPOINT_HEAT_C"
@@ -204,6 +219,7 @@ class Control4Climate(Control4Entity, ClimateEntity):  # type: ignore[misc]
         else:
             self._thermostat_setup = {}
         self._aux_heat_active = False
+        self._discovered_schedule_presets: set[str] = set()
 
     def create_api_object(self):
         """Create a pyControl4 device object.
@@ -244,18 +260,110 @@ class Control4Climate(Control4Entity, ClimateEntity):  # type: ignore[misc]
             return [FAN_MODES[x] for x in control4_fan_modes if x in FAN_MODES]
         return list(FAN_MODES.values())
 
+    @staticmethod
+    def _split_csv(value: str | list[str] | None) -> list[str]:
+        """Split a Control4 CSV list attribute into stripped items."""
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return [item.strip() for item in str(value).split(",") if item.strip()]
+
+    def _control4_hold_mode(self) -> str | None:
+        """Return raw Control4 HOLD_MODE."""
+        hold = self._extra_state_attributes.get(ATTR_HOLD_MODE)
+        if hold is None:
+            return None
+        hold_str = str(hold).strip()
+        return hold_str or None
+
+    def _hold_is_active(self) -> bool:
+        """True when Control4 hold is anything other than Off."""
+        hold = self._control4_hold_mode()
+        if hold is None:
+            return False
+        return hold.casefold() != CONTROL4_HOLD_OFF.casefold()
+
+    def _schedule_preset(self) -> str | None:
+        """Return the Control4 schedule preset name (PRESET), if any."""
+        preset = self._extra_state_attributes.get(ATTR_PRESET)
+        if preset is None:
+            return None
+        preset_str = str(preset).strip()
+        if not preset_str or preset_str.casefold() == "undefined":
+            return None
+        self._discovered_schedule_presets.add(preset_str)
+        return preset_str
+
+    def _supports_permanent_hold(self) -> bool:
+        """True if this thermostat advertises Permanent hold."""
+        hold_modes = self._split_csv(
+            self._extra_state_attributes.get(ATTR_HOLD_MODES_LIST)
+        )
+        if not hold_modes:
+            # Domosapiens / Aprilaire drivers commonly support Permanent hold
+            # even when the list attribute is missing.
+            return True
+        return any(
+            mode.casefold() == CONTROL4_HOLD_PERMANENT.casefold()
+            for mode in hold_modes
+        )
+
+    def _configured_schedule_presets(self) -> list[str]:
+        """Schedule presets from integration options (or built-in defaults)."""
+        return parse_climate_schedule_presets(
+            self.entry.options.get(CONF_CLIMATE_SCHEDULE_PRESETS)
+        )
+
     @property
     def preset_modes(self) -> list[str] | None:  # type: ignore[override]
-        """Return the list of available preset modes."""
-        preset_modes = self._extra_state_attributes.get(ATTR_HOLD_MODES_LIST)
-        if preset_modes:
-            return preset_modes.split(",")
-        return None
+        """Return combined schedule presets plus hold.
+
+        Schedule presets come from the Configure option (comma-delimited),
+        falling back to built-in defaults, plus any PRESETS_LIST / live PRESET
+        values. Permanent hold is exposed as a single synthetic preset ``Hold``.
+        """
+        modes: list[str] = []
+        seen: set[str] = set()
+        hold_labels = {
+            CONTROL4_HOLD_PERMANENT.casefold(),
+            PRESET_HOLD.casefold(),
+        }
+
+        def _add(name: str) -> None:
+            key = name.casefold()
+            if key in seen or key in hold_labels:
+                return
+            seen.add(key)
+            modes.append(name)
+
+        for name in self._configured_schedule_presets():
+            _add(name)
+
+        for name in self._split_csv(
+            self._extra_state_attributes.get(ATTR_PRESETS_LIST)
+        ):
+            _add(name)
+
+        current = self._schedule_preset()
+        if current:
+            _add(current)
+
+        for name in sorted(self._discovered_schedule_presets, key=str.casefold):
+            _add(name)
+
+        if self._supports_permanent_hold() and PRESET_HOLD.casefold() not in seen:
+            seen.add(PRESET_HOLD.casefold())
+            modes.append(PRESET_HOLD)
+
+        return modes or None
 
     @property
     def preset_mode(self) -> str | None:  # type: ignore[override]
-        """Return the current preset mode."""
-        return self._extra_state_attributes.get(ATTR_HOLD_MODE)
+        """Return hold when active, otherwise the schedule preset."""
+        if self._hold_is_active():
+            return PRESET_HOLD
+        return self._schedule_preset()
 
     @property
     def hvac_action(self) -> HVACAction | None:  # type: ignore[override]
@@ -429,10 +537,29 @@ class Control4Climate(Control4Entity, ClimateEntity):  # type: ignore[misc]
             )
 
     async def async_set_preset_mode(self, preset_mode) -> None:
-        """Set new target preset mode."""
-        c4_climate = self.create_api_object()
-        await c4_climate.set_hold_mode(preset_mode)
+        """Set schedule preset or permanent hold.
 
+        Selecting a schedule preset clears hold (``Off``) then applies
+        ``SET_PRESET``. Selecting ``Hold`` (or legacy ``Permanent``) enables
+        permanent hold on the current setpoints. Legacy ``Off`` only clears
+        hold so the thermostat follows its schedule again.
+        """
+        c4_climate = self.create_api_object()
+        requested = str(preset_mode).strip()
+        requested_key = requested.casefold()
+
+        if requested_key in {PRESET_HOLD.casefold(), CONTROL4_HOLD_PERMANENT.casefold()}:
+            await c4_climate.set_hold_mode(CONTROL4_HOLD_PERMANENT)
+            return
+
+        if requested_key == CONTROL4_HOLD_OFF.casefold():
+            await c4_climate.set_hold_mode(CONTROL4_HOLD_OFF)
+            return
+
+        # Schedule preset: release hold first so the new activity is active.
+        await c4_climate.set_hold_mode(CONTROL4_HOLD_OFF)
+        await c4_climate.set_preset(requested)
+        self._discovered_schedule_presets.add(requested)
 
     async def _set_cool_setpoint(self, temp) -> None:
         c4_climate = self.create_api_object()
