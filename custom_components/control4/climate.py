@@ -79,6 +79,9 @@ FAN_MODES = {
 ATTR_HUMIDITY = "HUMIDITY"
 ATTR_TEMPERATURE_F = "TEMPERATURE_F"
 ATTR_TEMPERATURE_C = "TEMPERATURE_C"
+ATTR_CURRENT_TEMPERATURE_F = "CURRENT_TEMPERATURE_F"
+ATTR_CURRENT_TEMPERATURE_C = "CURRENT_TEMPERATURE_C"
+ATTR_RAW_TEMPERATURE = "TEMPERATURE"
 ATTR_FAN_MODE = "FAN_MODE"
 ATTR_FAN_STATE = "FAN_STATE"
 ATTR_FAN_MODES_LIST = "FAN_MODES_LIST"
@@ -219,12 +222,32 @@ class Control4Climate(Control4Entity, ClimateEntity):  # type: ignore[misc]
             return None
         return self._extra_state_attributes.get(ATTR_HUMIDITY)
 
+    def _get_current_temperature(self) -> float | None:
+        """Return live room temperature.
+
+        Some thermostat drivers (e.g. Domosapiens Aprilaire) expose both a
+        display/V1 temperature (TEMPERATURE_F) and a live reading
+        (CURRENT_TEMPERATURE_F). Control4 touchscreens use the live value;
+        prefer it when present.
+        """
+        attrs = self._extra_state_attributes
+        if self.temperature_unit == UnitOfTemperature.FAHRENHEIT:
+            live = attrs.get(ATTR_CURRENT_TEMPERATURE_F)
+            if live is not None:
+                return live
+            raw = attrs.get(ATTR_RAW_TEMPERATURE)
+            if isinstance(raw, (int, float)) and 40 <= raw <= 120:
+                return float(raw)
+            return attrs.get(ATTR_TEMPERATURE_F)
+        live = attrs.get(ATTR_CURRENT_TEMPERATURE_C)
+        if live is not None:
+            return live
+        return attrs.get(ATTR_TEMPERATURE_C)
+
     @property
     def current_temperature(self) -> float | None:  # type: ignore[override]
         """Return the current temperature."""
-        if self.temperature_unit == UnitOfTemperature.FAHRENHEIT:
-            return self._extra_state_attributes.get(ATTR_TEMPERATURE_F)
-        return self._extra_state_attributes.get(ATTR_TEMPERATURE_C)
+        return self._get_current_temperature()
 
     @property
     def fan_mode(self) -> str | None:  # type: ignore[override]
