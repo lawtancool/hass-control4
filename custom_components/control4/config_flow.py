@@ -19,6 +19,7 @@ from homeassistant.core import callback
 from homeassistant.helpers import aiohttp_client, config_validation as cv
 from homeassistant.helpers.device_registry import format_mac
 
+from .alarm_utils import arm_state_choices, auto_map_ha_modes
 from .const import (
     CONF_ALARM_ARM_STATES,
     CONF_ALARM_AWAY_MODE,
@@ -206,21 +207,42 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             _LOGGER.debug(user_input)
             return self.async_create_entry(title="", data=user_input)
 
-        # TODO: figure out how to accept empty strings to disable modes
-        # TODO: figure out how to only show alarm options if a alarm_control_panel entity exists
         self.entry_data = self.hass.data[DOMAIN][self._config_entry.entry_id]
 
-        # Minimal approach: use existing cached arm states only
-        arm_state_choices = set(self.entry_data.get(CONF_ALARM_ARM_STATES, [])) or {
-            DEFAULT_ALARM_AWAY_MODE
-        }
-
-        # Determine if a security panel is effectively present (has real arm states)
+        choices = arm_state_choices(self.entry_data)
         has_security = any(
-            x.strip() and x.strip() != DEFAULT_ALARM_AWAY_MODE for x in arm_state_choices
+            x.strip()
+            and x.strip()
+            not in {
+                DEFAULT_ALARM_AWAY_MODE,
+                DEFAULT_ALARM_HOME_MODE,
+                DEFAULT_ALARM_NIGHT_MODE,
+                DEFAULT_ALARM_CUSTOM_BYPASS_MODE,
+                DEFAULT_ALARM_VACATION_MODE,
+            }
+            for x in self.entry_data.get(CONF_ALARM_ARM_STATES, set())
         )
 
-        # Always include scan interval; include alarm options only if we have a panel
+        auto_defaults = auto_map_ha_modes(
+            [
+                x
+                for x in self.entry_data.get(CONF_ALARM_ARM_STATES, set())
+                if x
+                not in {
+                    DEFAULT_ALARM_AWAY_MODE,
+                    DEFAULT_ALARM_HOME_MODE,
+                    DEFAULT_ALARM_NIGHT_MODE,
+                    DEFAULT_ALARM_CUSTOM_BYPASS_MODE,
+                    DEFAULT_ALARM_VACATION_MODE,
+                }
+            ]
+        )
+
+        def _default_mode(option_key: str, default_not_set: str) -> str:
+            return self._config_entry.options.get(
+                option_key, auto_defaults.get(option_key, default_not_set)
+            )
+
         if has_security:
             data_schema = vol.Schema(
                 {
@@ -232,34 +254,28 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     ): vol.All(cv.positive_int, vol.Clamp(min=MIN_SCAN_INTERVAL)),
                     vol.Optional(
                         CONF_ALARM_AWAY_MODE,
-                        default=self._config_entry.options.get(
-                            CONF_ALARM_AWAY_MODE, DEFAULT_ALARM_AWAY_MODE
-                        ),
-                    ): vol.In(sorted(arm_state_choices)),
+                        default=_default_mode(CONF_ALARM_AWAY_MODE, DEFAULT_ALARM_AWAY_MODE),
+                    ): vol.In(choices),
                     vol.Optional(
                         CONF_ALARM_HOME_MODE,
-                        default=self._config_entry.options.get(
-                            CONF_ALARM_HOME_MODE, DEFAULT_ALARM_HOME_MODE
-                        ),
-                    ): vol.In(sorted(arm_state_choices)),
+                        default=_default_mode(CONF_ALARM_HOME_MODE, DEFAULT_ALARM_HOME_MODE),
+                    ): vol.In(choices),
                     vol.Optional(
                         CONF_ALARM_NIGHT_MODE,
-                        default=self._config_entry.options.get(
-                            CONF_ALARM_NIGHT_MODE, DEFAULT_ALARM_NIGHT_MODE
-                        ),
-                    ): vol.In(sorted(arm_state_choices)),
+                        default=_default_mode(CONF_ALARM_NIGHT_MODE, DEFAULT_ALARM_NIGHT_MODE),
+                    ): vol.In(choices),
                     vol.Optional(
                         CONF_ALARM_CUSTOM_BYPASS_MODE,
-                        default=self._config_entry.options.get(
+                        default=_default_mode(
                             CONF_ALARM_CUSTOM_BYPASS_MODE, DEFAULT_ALARM_CUSTOM_BYPASS_MODE
                         ),
-                    ): vol.In(sorted(arm_state_choices)),
+                    ): vol.In(choices),
                     vol.Optional(
                         CONF_ALARM_VACATION_MODE,
-                        default=self._config_entry.options.get(
+                        default=_default_mode(
                             CONF_ALARM_VACATION_MODE, DEFAULT_ALARM_VACATION_MODE
                         ),
-                    ): vol.In(sorted(arm_state_choices)),
+                    ): vol.In(choices),
                 },
                 required=False,
             )
