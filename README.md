@@ -1,6 +1,6 @@
 # hass-control4
 
-This custom integration for Home Assistant allows control of Control4 lights, locks (only locks that are relay-based in Control4), alarm control panels, door/window/motion sensors (as binary sensors), thermostats, fans, relay devices (as switches), and blinds/shades (as covers, stateless open/close/stop). Composer **custom variables** (sensors) and **macros** (buttons) are discovered automatically.
+This custom integration for Home Assistant allows control of Control4 lights, locks (only locks that are relay-based in Control4), alarm control panels, door/window/motion sensors (as binary sensors), thermostats, fans, relay devices (as switches), and blinds/shades (as covers, stateless open/close/stop). Composer **custom variables** and **macros** (buttons) are discovered automatically.
 
 ## Installation
 
@@ -22,10 +22,15 @@ In the dialog that appears, choose the Control4 alarm arming modes that you want
 
 All Composer **custom variables** (Variables agent) and **macros** (Macros agent) are discovered automatically on setup and reload.
 
-- **Variables** → one `sensor` per variable (WebSocket push, read-only)
+- **Variables** → read-only entities by Composer type (WebSocket push):
+  - **Number** / **Float** → `number`
+  - **Boolean** → `switch`
+  - **String** → `text`
+  - **Device** → `select`
+  - other types → `sensor`
 - **Macros** → one `button` per macro (single press to run)
 
-Entities are **disabled by default** so programming objects do not clutter automations or dashboards until you enable the ones you want under **Settings → Devices & services → Entities** (filter by the **Control4 Variables** or **Control4 Macros** device).
+Entities are **disabled by default** so programming objects do not clutter automations or dashboards until you enable the ones you want under **Settings → Devices & services → Entities** (filter by the **Variables** or **Macros** device).
 
 After adding or renaming variables/macros in Composer, call **`control4.reload_programming`** (or reload the Control4 integration) to pick up the new list.
 
@@ -39,8 +44,8 @@ After adding or renaming variables/macros in Composer, call **`control4.reload_p
 
 Safe defaults for verifying the integration:
 
-- Variable: enable **`DebugInt1`** under **Control4 Variables**
-- Macro: enable **`Test`** under **Control4 Macros**, or:
+- Variable: enable **`DebugInt1`** under **Variables**
+- Macro: enable **`Test`** under **Macros**, or:
 
 ```yaml
 service: control4.execute_macro

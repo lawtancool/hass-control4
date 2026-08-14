@@ -89,8 +89,11 @@ PLATFORMS = [
     Platform.BINARY_SENSOR,
     Platform.LOCK,
     Platform.MEDIA_PLAYER,
+    Platform.NUMBER,
+    Platform.SELECT,
     Platform.SENSOR,
     Platform.SWITCH,
+    Platform.TEXT,
     Platform.FAN,
     Platform.CLIMATE,
     Platform.COVER,
@@ -160,10 +163,19 @@ async def _async_register_services(hass: HomeAssistant) -> None:
     if hass.services.has_service(DOMAIN, SERVICE_EXECUTE_MACRO):
         return
 
+    async def execute_macro_service(call: ServiceCall) -> None:
+        await _handle_execute_macro(hass, call)
+
+    async def read_custom_variable_service(call: ServiceCall) -> dict:
+        return await _handle_read_custom_variable(hass, call)
+
+    async def reload_programming_service(call: ServiceCall) -> None:
+        await _handle_reload_programming(hass, call)
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_EXECUTE_MACRO,
-        lambda call: _handle_execute_macro(hass, call),
+        execute_macro_service,
         schema=vol.Schema(
             {
                 vol.Required("macro_name"): cv.string,
@@ -174,7 +186,7 @@ async def _async_register_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         SERVICE_READ_CUSTOM_VARIABLE,
-        lambda call: _handle_read_custom_variable(hass, call),
+        read_custom_variable_service,
         schema=vol.Schema(
             {
                 vol.Required("variable_name"): cv.string,
@@ -186,7 +198,7 @@ async def _async_register_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         SERVICE_RELOAD_PROGRAMMING,
-        lambda call: _handle_reload_programming(hass, call),
+        reload_programming_service,
         schema=vol.Schema({vol.Optional("config_entry_id"): cv.string}),
     )
 
@@ -238,6 +250,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry_data[CONF_DIRECTOR_ALL_ITEMS] = director_all_items
     entry_data[CONF_VARIABLES_AGENT_ID] = find_variables_agent_id(director_all_items)
     entry_data[CONF_MACROS_AGENT_ID] = find_macros_agent_id(director_all_items)
+
+    controller_identifier = (DOMAIN, entry_data[CONF_CONTROLLER_UNIQUE_ID])
+    if entry_data[CONF_VARIABLES_AGENT_ID] is not None:
+        variables_device = device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, f"{entry.entry_id}_variables_agent")},
+            manufacturer="Control4",
+            model="Variables agent",
+            name="Variables",
+            via_device=controller_identifier,
+        )
+        if variables_device.name != "Variables":
+            device_registry.async_update_device(variables_device.id, name="Variables")
+    if entry_data[CONF_MACROS_AGENT_ID] is not None:
+        macros_device = device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, f"{entry.entry_id}_macros_agent")},
+            manufacturer="Control4",
+            model="Macros agent",
+            name="Macros",
+            via_device=controller_identifier,
+        )
+        if macros_device.name != "Macros":
+            device_registry.async_update_device(macros_device.id, name="Macros")
 
     entry_data[CONF_UI_CONFIGURATION] = await entry_data[CONF_DIRECTOR].get_ui_configuration()
 

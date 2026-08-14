@@ -26,6 +26,7 @@ CONF_UI_CONFIGURATION = "ui_configuration"
 
 CONF_VARIABLES_AGENT_ID = "variables_agent_id"
 CONF_MACROS_AGENT_ID = "macros_agent_id"
+CONF_CUSTOM_VARIABLE_DISCOVERY = "custom_variable_discovery"
 
 DEFAULT_SCAN_INTERVAL = 5
 MIN_SCAN_INTERVAL = 1

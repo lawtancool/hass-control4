@@ -99,7 +99,7 @@ class Control4MacroButton(ButtonEntity):
             identifiers={(DOMAIN, f"{self._entry.entry_id}_macros_agent")},
             manufacturer="Control4",
             model="Macros agent",
-            name="Control4 Macros",
+            name="Macros",
             via_device=(DOMAIN, controller_id),
         )
 
