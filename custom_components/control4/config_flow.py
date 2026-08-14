@@ -204,7 +204,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """Handle options flow."""
         if user_input is not None:
             _LOGGER.debug(user_input)
-            return self.async_create_entry(title="", data=user_input)
+            cleaned = dict(user_input)
+            return self.async_create_entry(title="", data=cleaned)
 
         # TODO: figure out how to accept empty strings to disable modes
         # TODO: figure out how to only show alarm options if a alarm_control_panel entity exists

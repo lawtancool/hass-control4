@@ -82,6 +82,10 @@ async def async_setup_entry(
 
     async_add_entities(entity_list, True)
 
+    from .custom_variable import async_setup_custom_variable_switches
+
+    await async_setup_custom_variable_switches(hass, entry, async_add_entities)
+
 
 class Control4Switch(Control4Entity, SwitchEntity):
     """Control4 switch entity."""
