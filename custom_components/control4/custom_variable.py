@@ -1,4 +1,4 @@
-"""Expose selected Composer custom variables as Home Assistant sensors."""
+"""Expose Composer custom variables as Home Assistant sensors."""
 from __future__ import annotations
 
 import logging
@@ -11,10 +11,10 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import Control4Entity
-from .agents import configured_option_names, find_variables_agent_id
+from .agents import find_variables_agent_id, list_custom_variables
 from .const import (
     CONF_CONTROLLER_UNIQUE_ID,
-    CONF_CUSTOM_VAR_NAME_KEYS,
+    CONF_DIRECTOR,
     CONF_DIRECTOR_ALL_ITEMS,
     CONF_VARIABLES_AGENT_ID,
     DOMAIN,
@@ -29,9 +29,6 @@ async def async_setup_entry(
 ) -> None:
     """Set up custom variable sensors for a config entry."""
     entry_data = hass.data[DOMAIN][entry.entry_id]
-    var_names = configured_option_names(entry.options, CONF_CUSTOM_VAR_NAME_KEYS)
-    if not var_names:
-        return
 
     variables_agent_id = entry_data.get(CONF_VARIABLES_AGENT_ID)
     if variables_agent_id is None:
@@ -46,9 +43,9 @@ async def async_setup_entry(
         )
         return
 
-    agent_attrs = await director_get_entry_variables(
-        hass, entry, variables_agent_id
-    )
+    director = entry_data[CONF_DIRECTOR]
+    var_defs = await list_custom_variables(director, variables_agent_id)
+    agent_attrs = await director_get_entry_variables(hass, entry, variables_agent_id)
     parent_id = next(
         (
             item.get("parentId", 1)
@@ -58,18 +55,33 @@ async def async_setup_entry(
         1,
     )
 
-    entities = [
-        Control4CustomVariableSensor(
-            entry_data=entry_data,
-            entry=entry,
-            var_name=name,
-            variables_agent_id=variables_agent_id,
-            parent_id=parent_id,
-            agent_attributes=agent_attrs,
+    entities: list[Control4CustomVariableSensor] = []
+    for var_def in var_defs:
+        if var_def.get("hidden"):
+            continue
+        var_name = var_def.get("varName") or var_def.get("name")
+        variable_id = var_def.get("variableId")
+        if not var_name or variable_id is None:
+            continue
+        entities.append(
+            Control4CustomVariableSensor(
+                entry_data=entry_data,
+                entry=entry,
+                var_name=str(var_name),
+                variable_id=int(variable_id),
+                var_type=var_def.get("type"),
+                variables_agent_id=variables_agent_id,
+                parent_id=parent_id,
+                agent_attributes=agent_attrs,
+            )
         )
-        for name in var_names
-    ]
-    async_add_entities(entities)
+
+    if entities:
+        _LOGGER.info(
+            "Discovered %d Composer custom variables (entities disabled by default)",
+            len(entities),
+        )
+        async_add_entities(entities)
 
 
 class Control4CustomVariableSensor(Control4Entity, SensorEntity):
@@ -77,12 +89,15 @@ class Control4CustomVariableSensor(Control4Entity, SensorEntity):
 
     _attr_has_entity_name = True
     _attr_should_poll = False
+    _attr_entity_registry_enabled_default = False
 
     def __init__(
         self,
         entry_data: dict,
         entry: ConfigEntry,
         var_name: str,
+        variable_id: int,
+        var_type: str | None,
         variables_agent_id: int,
         parent_id: int,
         agent_attributes: dict[str, Any],
@@ -101,8 +116,10 @@ class Control4CustomVariableSensor(Control4Entity, SensorEntity):
             agent_attributes,
         )
         self._var_name = var_name
+        self._variable_id = variable_id
+        self._var_type = var_type
         self._variables_agent_id = variables_agent_id
-        self._attr_unique_id = f"{entry.entry_id}_custom_var_{var_name}"
+        self._attr_unique_id = f"{entry.entry_id}_var_{variable_id}"
 
     @property
     def native_value(self) -> Any:
@@ -138,5 +155,7 @@ class Control4CustomVariableSensor(Control4Entity, SensorEntity):
         return {
             **base,
             "variable_name": self._var_name,
+            "variable_id": self._variable_id,
+            "variable_type": self._var_type,
             "variables_agent_id": self._variables_agent_id,
         }

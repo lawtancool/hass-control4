@@ -1,4 +1,4 @@
-"""Expose selected Composer macros as Home Assistant buttons."""
+"""Expose Composer macros as Home Assistant buttons."""
 from __future__ import annotations
 
 import logging
@@ -9,18 +9,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .agents import (
-    configured_option_names,
-    execute_macro,
-    find_macros_agent_id,
-    list_macros,
-    macros_by_name,
-)
+from .agents import execute_macro, find_macros_agent_id, list_macros
 from .const import (
     CONF_CONTROLLER_UNIQUE_ID,
     CONF_DIRECTOR,
     CONF_DIRECTOR_ALL_ITEMS,
-    CONF_MACRO_NAME_KEYS,
     CONF_MACROS_AGENT_ID,
     DOMAIN,
 )
@@ -33,9 +26,6 @@ async def async_setup_entry(
 ) -> None:
     """Set up macro buttons for a config entry."""
     entry_data = hass.data[DOMAIN][entry.entry_id]
-    macro_names = configured_option_names(entry.options, CONF_MACRO_NAME_KEYS)
-    if not macro_names:
-        return
 
     macros_agent_id = entry_data.get(CONF_MACROS_AGENT_ID)
     if macros_agent_id is None:
@@ -47,28 +37,29 @@ async def async_setup_entry(
         return
 
     director = entry_data[CONF_DIRECTOR]
-    available = macros_by_name(await list_macros(director))
+    macros = await list_macros(director)
     entities: list[Control4MacroButton] = []
 
-    for name in macro_names:
-        macro = available.get(name)
-        if macro is None:
-            _LOGGER.warning(
-                "Composer macro %r not found on director; skipping button entity",
-                name,
-            )
+    for macro in macros:
+        macro_id = macro.get("id")
+        macro_name = macro.get("name")
+        if macro_id is None or not macro_name:
             continue
         entities.append(
             Control4MacroButton(
                 entry=entry,
                 entry_data=entry_data,
-                macro_id=int(macro["id"]),
-                macro_name=name,
+                macro_id=int(macro_id),
+                macro_name=str(macro_name),
                 macros_agent_id=macros_agent_id,
             )
         )
 
     if entities:
+        _LOGGER.info(
+            "Discovered %d Composer macros (entities disabled by default)",
+            len(entities),
+        )
         async_add_entities(entities)
 
 
@@ -76,6 +67,7 @@ class Control4MacroButton(ButtonEntity):
     """Button that executes one Composer macro."""
 
     _attr_has_entity_name = True
+    _attr_entity_registry_enabled_default = False
 
     def __init__(
         self,

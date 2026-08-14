@@ -27,8 +27,6 @@ from .const import (
     CONF_ALARM_NIGHT_MODE,
     CONF_ALARM_VACATION_MODE,
     CONF_CONTROLLER_UNIQUE_ID,
-    CONF_CUSTOM_VAR_NAME_KEYS,
-    CONF_MACRO_NAME_KEYS,
     DEFAULT_ALARM_AWAY_MODE,
     DEFAULT_ALARM_CUSTOM_BYPASS_MODE,
     DEFAULT_ALARM_HOME_MODE,
@@ -207,12 +205,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         if user_input is not None:
             _LOGGER.debug(user_input)
             cleaned = dict(user_input)
-            for key in (*CONF_CUSTOM_VAR_NAME_KEYS, *CONF_MACRO_NAME_KEYS):
-                name = cleaned.get(key)
-                if name is None or (isinstance(name, str) and not name.strip()):
-                    cleaned.pop(key, None)
-                elif isinstance(name, str):
-                    cleaned[key] = name.strip()
             return self.async_create_entry(title="", data=cleaned)
 
         # TODO: figure out how to accept empty strings to disable modes
@@ -228,25 +220,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         has_security = any(
             x.strip() and x.strip() != DEFAULT_ALARM_AWAY_MODE for x in arm_state_choices
         )
-
-        def _name_field(option_key: str, options: dict) -> dict:
-            current = options.get(option_key)
-            if current:
-                return {vol.Optional(option_key, default=str(current)): str}
-            return {vol.Optional(option_key): str}
-
-        opts = dict(self._config_entry.options)
-        custom_var_fields = {
-            k: schema
-            for key in CONF_CUSTOM_VAR_NAME_KEYS
-            for k, schema in _name_field(key, opts).items()
-        }
-        macro_fields = {
-            k: schema
-            for key in CONF_MACRO_NAME_KEYS
-            for k, schema in _name_field(key, opts).items()
-        }
-        agent_fields = {**custom_var_fields, **macro_fields}
 
         # Always include scan interval; include alarm options only if we have a panel
         if has_security:
@@ -288,7 +261,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                             CONF_ALARM_VACATION_MODE, DEFAULT_ALARM_VACATION_MODE
                         ),
                     ): vol.In(sorted(arm_state_choices)),
-                    **agent_fields,
                 },
                 required=False,
             )
@@ -301,7 +273,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
                         ),
                     ): vol.All(cv.positive_int, vol.Clamp(min=MIN_SCAN_INTERVAL)),
-                    **agent_fields,
                 },
                 required=False,
             )

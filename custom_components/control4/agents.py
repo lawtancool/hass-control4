@@ -73,18 +73,3 @@ async def list_custom_variables(
 def macros_by_name(macros: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Index macros by exact Composer name."""
     return {str(m["name"]): m for m in macros if m.get("name") is not None}
-
-
-def configured_option_names(
-    options: dict[str, Any], keys: tuple[str, ...]
-) -> list[str]:
-    """Collect non-blank option slot values in slot order."""
-    names: list[str] = []
-    for key in keys:
-        raw = options.get(key)
-        if raw is None:
-            continue
-        name = str(raw).strip()
-        if name:
-            names.append(name)
-    return names

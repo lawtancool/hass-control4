@@ -24,7 +24,7 @@ from homeassistant.const import (
     CONF_SCAN_INTERVAL,
 )
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
-from homeassistant.exceptions import ConfigEntryNotFound, HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 import voluptuous as vol
 
@@ -81,6 +81,7 @@ _LOGGER = logging.getLogger(__name__)
 
 SERVICE_EXECUTE_MACRO = "execute_macro"
 SERVICE_READ_CUSTOM_VARIABLE = "read_custom_variable"
+SERVICE_RELOAD_PROGRAMMING = "reload_programming"
 
 PLATFORMS = [
     Platform.LIGHT,
@@ -104,7 +105,7 @@ def _entry_for_service(hass: HomeAssistant, call: ServiceCall) -> ConfigEntry:
     if entry_id:
         entry = hass.config_entries.async_get_entry(entry_id)
         if entry is None or entry.domain != DOMAIN:
-            raise ConfigEntryNotFound(f"Config entry {entry_id} not found")
+            raise HomeAssistantError(f"Config entry {entry_id} not found")
         return entry
     if len(entries) == 1:
         return entries[0]
@@ -148,6 +149,12 @@ async def _handle_read_custom_variable(hass: HomeAssistant, call: ServiceCall) -
     return {"value": value}
 
 
+async def _handle_reload_programming(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Reload the config entry to re-discover variables and macros from Composer."""
+    entry = _entry_for_service(hass, call)
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
 async def _async_register_services(hass: HomeAssistant) -> None:
     """Register domain services once."""
     if hass.services.has_service(DOMAIN, SERVICE_EXECUTE_MACRO):
@@ -175,6 +182,12 @@ async def _async_register_services(hass: HomeAssistant) -> None:
             }
         ),
         supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RELOAD_PROGRAMMING,
+        lambda call: _handle_reload_programming(hass, call),
+        schema=vol.Schema({vol.Optional("config_entry_id"): cv.string}),
     )
 
 

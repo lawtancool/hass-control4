@@ -1,6 +1,6 @@
 # hass-control4
 
-This custom integration for Home Assistant allows control of Control4 lights, locks (only locks that are relay-based in Control4), alarm control panels, door/window/motion sensors (as binary sensors), thermostats, fans, relay devices (as switches), and blinds/shades (as covers, stateless open/close/stop). Optional Composer **custom variables** (sensors) and **macros** (buttons) can be exposed via integration options.
+This custom integration for Home Assistant allows control of Control4 lights, locks (only locks that are relay-based in Control4), alarm control panels, door/window/motion sensors (as binary sensors), thermostats, fans, relay devices (as switches), and blinds/shades (as covers, stateless open/close/stop). Composer **custom variables** (sensors) and **macros** (buttons) are discovered automatically.
 
 ## Installation
 
@@ -20,23 +20,33 @@ In the dialog that appears, choose the Control4 alarm arming modes that you want
 
 ### Custom variables and macros
 
-Composer **custom variables** (Variables agent) and **macros** (Macros agent) can be exposed in Home Assistant without creating device drivers for each one.
+All Composer **custom variables** (Variables agent) and **macros** (Macros agent) are discovered automatically on setup and reload.
 
-**Custom variables** become `sensor` entities updated over the Control4 WebSocket (`OnDataToUI` on the Variables agent), same as lights and thermostats — not polled. Names must match Composer exactly (case-sensitive), for example `DebugInt1` or `GateHoldOpen`. The Director REST API supports **read**; there is no generic write endpoint for custom variables today.
+- **Variables** → one `sensor` per variable (WebSocket push, read-only)
+- **Macros** → one `button` per macro (single press to run)
 
-**Macros** become `button` entities and can also be triggered with the `control4.execute_macro` service. Macro names must match Composer exactly, for example `AllOff`.
+Entities are **disabled by default** so programming objects do not clutter automations or dashboards until you enable the ones you want under **Settings → Devices & services → Entities** (filter by the **Control4 Variables** or **Control4 Macros** device).
 
-**Configure**
-
-1. **Settings → Devices & services → Control4 → Configure**
-2. Fill **Custom variable N name** slots for variables you want as sensors
-3. Fill **Macro N name** slots for macros you want as buttons
-4. **Submit** — the integration reloads
+After adding or renaming variables/macros in Composer, call **`control4.reload_programming`** (or reload the Control4 integration) to pick up the new list.
 
 **Services**
 
 - `control4.execute_macro` — run a macro by name (`macro_name`)
 - `control4.read_custom_variable` — read a variable by name (`variable_name`); returns `{ "value": ... }`
+- `control4.reload_programming` — re-discover variables and macros from the director
+
+**Testing**
+
+Safe defaults for verifying the integration:
+
+- Variable: enable **`DebugInt1`** under **Control4 Variables**
+- Macro: enable **`Test`** under **Control4 Macros**, or:
+
+```yaml
+service: control4.execute_macro
+data:
+  macro_name: Test
+```
 
 ## Disclaimer
 

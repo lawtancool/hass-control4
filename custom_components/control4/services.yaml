@@ -27,3 +27,10 @@ read_custom_variable:
     config_entry_id:
       description: Control4 config entry id (required when multiple entries exist).
       example: "0123456789abcdef"
+
+reload_programming:
+  description: Reload Control4 to re-discover Composer custom variables and macros.
+  fields:
+    config_entry_id:
+      description: Control4 config entry id (required when multiple entries exist).
+      example: "0123456789abcdef"
