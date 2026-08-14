@@ -7,3 +7,30 @@ send_alarm_keystrokes:
     keystrokes:
       description: String of keystrokes.
       example: "*101#"
+execute_macro:
+  description: Execute a Composer macro by exact name.
+  fields:
+    macro_name:
+      description: Composer macro name (must match Programming view).
+      example: "AllOff"
+      required: true
+    config_entry_id:
+      description: Control4 config entry id (required when multiple entries exist).
+      example: "0123456789abcdef"
+read_custom_variable:
+  description: Read one Composer custom variable from the Variables agent.
+  fields:
+    variable_name:
+      description: Exact custom variable name from Composer Programming.
+      example: "DebugInt1"
+      required: true
+    config_entry_id:
+      description: Control4 config entry id (required when multiple entries exist).
+      example: "0123456789abcdef"
+
+reload_programming:
+  description: Reload Control4 to re-discover Composer custom variables and macros.
+  fields:
+    config_entry_id:
+      description: Control4 config entry id (required when multiple entries exist).
+      example: "0123456789abcdef"
