@@ -12,6 +12,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from . import Control4Entity, get_items_of_category
+from .alarm_zone import async_setup_alarm_zones
 from .const import CONF_DIRECTOR, CONF_DIRECTOR_ALL_ITEMS, CONTROL4_ENTITY_TYPE, DOMAIN
 from .director_utils import director_get_entry_variables
 
@@ -153,6 +154,7 @@ async def async_setup_entry(
         )
 
     async_add_entities(entity_list, True)
+    await async_setup_alarm_zones(hass, entry, async_add_entities)
 
 
 class Control4BinarySensor(Control4Entity, BinarySensorEntity):  # type: ignore[misc]

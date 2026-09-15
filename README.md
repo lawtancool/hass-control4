@@ -18,6 +18,39 @@ If you are using an alarm control panel, you must go to Home Assistant -> Config
 
 In the dialog that appears, choose the Control4 alarm arming modes that you want to correspond to each Home Assistant arming mode. For example, a DSC alarm system uses "Stay" as the "Alarm arm home mode name", and "Away" as the "Alarm arm away mode name". If your alarm system does not use one of the mode names, select `(not set)`. Once you click submit on the dialog, Home Assistant will be able to arm your alarm control panel and detect its state.
 
+### Alarm-zone sensors
+
+Some alarm drivers expose zones through the security panel without creating separate
+items in Control4's sensors category. These zones are also discovered as read-only
+binary sensors, disabled by default to avoid duplicating existing sensors. Enable
+only the additional zones you need from the integration's entity list in Home
+Assistant. Their names come from the panel; IDs remain stable when names change.
+
+Enabled zones use live events and a shared five-second refresh per panel. Missing
+or unreadable states are unavailable, rather than reported as closed or clear.
+Zone types that the driver does not identify as motion retain a generic binary
+sensor class; they can be customized in Home Assistant.
+
+### Older controller compatibility
+
+Some controllers, including OS 2.10.6, return malformed XML from the optional UI
+configuration endpoint. Setup logs a warning and continues loading the other
+platforms. Room media players cannot be discovered without that endpoint.
+
+### Regression checks
+
+Run the focused checks with Python 3.12 or later:
+
+```sh
+python tests/test_legacy_setup.py
+python tests/test_alarm_zones.py
+```
+
+These dependency-free checks execute the relevant integration functions against
+Home Assistant/Director test doubles. They cover startup fallback, zone discovery,
+unknown states, event isolation, disconnect/recovery, and listener cleanup; they
+do not replace an integration test inside a running Home Assistant installation.
+
 ## Disclaimer
 
 This integration is essentially a newer version of the Control4 integration that is included in Home Assistant by default, and will receive new updates faster than the default integration.
