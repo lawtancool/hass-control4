@@ -6,6 +6,7 @@ import asyncio
 import logging
 from functools import cached_property
 from typing import Any
+from xml.parsers.expat import ExpatError
 import random
 
 from aiohttp import client_exceptions
@@ -124,7 +125,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryNotReady(exception) from exception
     entry_data[CONF_DIRECTOR_ALL_ITEMS] = director_all_items
 
-    entry_data[CONF_UI_CONFIGURATION] = await entry_data[CONF_DIRECTOR].get_ui_configuration()
+    try:
+        entry_data[CONF_UI_CONFIGURATION] = await entry_data[
+            CONF_DIRECTOR
+        ].get_ui_configuration()
+    except ExpatError:
+        # Some controllers return a non-XML error page for this optional API.
+        # Only room media players use it; allow other platforms to initialize.
+        entry_data[CONF_UI_CONFIGURATION] = {"experiences": []}
+        _LOGGER.warning(
+            "Control4 UI configuration returned malformed XML; "
+            "room media players cannot be discovered. Continuing other platforms."
+        )
 
     # Load options from config entry
     entry_data[CONF_SCAN_INTERVAL] = entry.options.get(
