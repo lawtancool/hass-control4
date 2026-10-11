@@ -279,6 +279,25 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
     )
 
 
+
+def _set_via_controller(
+    hass: HomeAssistant, info: DeviceInfo, controller_unique_id: str
+) -> None:
+    """Link a device to the Control4 controller device.
+
+    Newer Home Assistant versions reject the deprecated `via_device` key and
+    require `via_device_id` (the controller's device registry ID); older ones
+    only know `via_device`.
+    """
+    if "via_device_id" not in DeviceInfo.__annotations__:
+        info["via_device"] = (DOMAIN, controller_unique_id)
+        return
+    controller = dr.async_get(hass).async_get_device(
+        identifiers={(DOMAIN, controller_unique_id)}
+    )
+    if controller is not None:
+        info["via_device_id"] = controller.id
+
 class C4WebsocketConnectionTracker:
     """Object that provides callables to manually refresh entity states if the Control4 Websocket is disconnected/reconnected."""
 
@@ -458,14 +477,15 @@ class Control4Entity(Entity):
     @cached_property
     def device_info(self) -> DeviceInfo:
         """Return info of parent Control4 device of entity."""
-        return DeviceInfo(
+        info = DeviceInfo(
             identifiers={(DOMAIN, str(self._device_id))},
             manufacturer=self._device_manufacturer,
             model=self._device_model,
             name=self._device_name,
-            via_device=(DOMAIN, self._controller_unique_id),
             suggested_area=self._device_area,
         )
+        _set_via_controller(self.hass, info, self._controller_unique_id)
+        return info
 
     @property
     def extra_state_attributes(self) -> dict:  # type: ignore[override]
@@ -508,14 +528,15 @@ class Control4CoordinatorEntity(CoordinatorEntity[Any]):
     @cached_property
     def device_info(self) -> DeviceInfo:
         """Return info of parent Control4 device of entity."""
-        return DeviceInfo(
+        info = DeviceInfo(
             identifiers={(DOMAIN, str(self._device_id))},
             manufacturer=self._device_manufacturer,
             model=self._device_model,
             name=self._device_name,
-            via_device=(DOMAIN, self._controller_unique_id),
             suggested_area=self._device_area,
         )
+        _set_via_controller(self.hass, info, self._controller_unique_id)
+        return info
 
     @property
     def extra_state_attributes(self) -> dict:  # type: ignore[override]
