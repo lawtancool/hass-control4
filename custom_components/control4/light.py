@@ -24,7 +24,10 @@ from homeassistant.util.color import value_to_brightness, brightness_to_value
 
 from . import Control4Entity, get_items_of_category
 from .const import CONF_DIRECTOR, CONTROL4_ENTITY_TYPE, DOMAIN
-from .director_utils import director_get_entry_variables
+from .director_utils import (
+    director_get_entry_variables,
+    director_get_multiple_entries_variables,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,8 +44,7 @@ async def async_setup_entry(
 
     items_of_category = await get_items_of_category(hass, entry, CONTROL4_CATEGORY)
 
-    entity_list = []
-
+    valid_items = []
     for item in items_of_category:
         try:
             if item["type"] == CONTROL4_ENTITY_TYPE and item["id"] and item["proxy"] != "fan":
@@ -60,6 +62,18 @@ async def async_setup_entry(
                         item_manufacturer = parent_item["manufacturer"]
                         item_device_name = parent_item["name"]
                         item_model = parent_item["model"]
+
+                valid_items.append(
+                    {
+                        "item_name": item_name,
+                        "item_id": item_id,
+                        "item_area": item_area,
+                        "item_parent_id": item_parent_id,
+                        "item_manufacturer": item_manufacturer,
+                        "item_device_name": item_device_name,
+                        "item_model": item_model,
+                    }
+                )
             else:
                 continue
         except KeyError:
@@ -69,19 +83,25 @@ async def async_setup_entry(
             )
             continue
 
-        item_attributes = await director_get_entry_variables(hass, entry, item_id)
+    item_ids = [item_info["item_id"] for item_info in valid_items]
+    variables_map = await director_get_multiple_entries_variables(
+        hass, entry, item_ids
+    )
 
+    entity_list = []
+    for item_info in valid_items:
+        item_attributes = variables_map.get(item_info["item_id"], {})
         entity_list.append(
             Control4Light(
                 entry_data,
                 entry,
-                item_name,
-                item_id,
-                item_device_name,
-                item_manufacturer,
-                item_model,
-                item_parent_id,
-                item_area,
+                item_info["item_name"],
+                item_info["item_id"],
+                item_info["item_device_name"],
+                item_info["item_manufacturer"],
+                item_info["item_model"],
+                item_info["item_parent_id"],
+                item_info["item_area"],
                 item_attributes,
             )
         )
