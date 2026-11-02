@@ -61,7 +61,10 @@ from .const import (
     RETRY_BACKOFF_MAX_SEC,
     SCHEDULE_REFRESH_ADVANCE_SEC,
 )
-from .director_utils import director_get_entry_variables
+from .director_utils import (
+    director_get_entry_variables,
+    director_get_multiple_entries_variables,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -300,14 +303,14 @@ class C4WebsocketConnectionTracker:
         item_callbacks = self.hass.data[DOMAIN][self.entry.entry_id][
             CONF_WEBSOCKET
         ].item_callbacks
+        variables_map = await director_get_multiple_entries_variables(
+            self.hass, self.entry, list(item_callbacks.keys())
+        )
         for item_id, callback in item_callbacks.items():
-            item_attributes = await director_get_entry_variables(
-                self.hass, self.entry, item_id
-            )
             message = {
                 "evtName": "OnDataToUI",
                 "iddevice": item_id,
-                "data": item_attributes,
+                "data": variables_map.get(item_id, {}),
             }
             await callback(item_id, message)
 
