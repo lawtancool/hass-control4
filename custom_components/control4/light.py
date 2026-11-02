@@ -19,6 +19,10 @@ from homeassistant.components.light import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import (
+    device_registry as dr,
+    entity_registry as er,
+)
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util.color import value_to_brightness, brightness_to_value
 
@@ -41,6 +45,9 @@ async def async_setup_entry(
 
     items_of_category = await get_items_of_category(hass, entry, CONTROL4_CATEGORY)
 
+    dev_reg = dr.async_get(hass)
+    ent_reg = er.async_get(hass)
+
     entity_list = []
 
     for item in items_of_category:
@@ -52,14 +59,47 @@ async def async_setup_entry(
                 item_parent_id = item["parentId"]
 
                 item_manufacturer = None
-                item_device_name = None
-                item_model = None
+                parent_name = None
+                parent_model = None
 
                 for parent_item in items_of_category:
                     if parent_item["id"] == item_parent_id:
-                        item_manufacturer = parent_item["manufacturer"]
-                        item_device_name = parent_item["name"]
-                        item_model = parent_item["model"]
+                        item_manufacturer = parent_item.get("manufacturer")
+                        parent_name = parent_item.get("name")
+                        parent_model = parent_item.get("model")
+                        break
+
+                item_device_name = item_name if item_name else (parent_name or "Light")
+                if parent_name and parent_model:
+                    item_model = f"{parent_name} ({parent_model})"
+                elif parent_name:
+                    item_model = parent_name
+                else:
+                    item_model = parent_model
+
+                # Migrate existing device registry entry if name still matches generic parent name
+                device_entry = dev_reg.async_get_device(
+                    identifiers={(DOMAIN, str(item_parent_id))}
+                )
+                if device_entry and (
+                    device_entry.name != item_device_name
+                    or device_entry.model != item_model
+                ):
+                    dev_reg.async_update_device(
+                        device_entry.id,
+                        name=item_device_name,
+                        model=item_model,
+                    )
+
+                # Migrate existing entity registry entry if it has a stale custom name with parent prefix
+                entity_id = ent_reg.async_get_entity_id(
+                    "light", DOMAIN, str(item_id)
+                )
+                if entity_id:
+                    entity_entry = ent_reg.async_get(entity_id)
+                    if entity_entry and entity_entry.name:
+                        if parent_name and parent_name.lower() in entity_entry.name.lower():
+                            ent_reg.async_update_entity(entity_id, name=None)
             else:
                 continue
         except KeyError:
@@ -92,6 +132,8 @@ async def async_setup_entry(
 class Control4Light(Control4Entity, LightEntity):  # type: ignore[misc]
     """Control4 light entity."""
 
+    _attr_has_entity_name = True
+
     def __init__(
         self,
         entry_data,
@@ -117,6 +159,8 @@ class Control4Light(Control4Entity, LightEntity):  # type: ignore[misc]
             device_area,
             device_attributes,
         )
+
+        self._attr_name = None
 
         # Defaults
         self._supports_color: bool = False
