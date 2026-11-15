@@ -323,7 +323,7 @@ class Control4Entity(Entity):
             manufacturer=self._device_manufacturer,
             model=self._device_model,
             name=self._device_name,
-            via_device=(DOMAIN, self._controller_unique_id),
+            via_device_id=(DOMAIN, self._controller_unique_id),
             suggested_area=self._device_area,
         )
 
@@ -373,7 +373,7 @@ class Control4CoordinatorEntity(CoordinatorEntity[Any]):
             manufacturer=self._device_manufacturer,
             model=self._device_model,
             name=self._device_name,
-            via_device=(DOMAIN, self._controller_unique_id),
+            via_device_id=(DOMAIN, self._controller_unique_id),
             suggested_area=self._device_area,
         )
 
