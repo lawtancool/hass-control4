@@ -280,7 +280,17 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
 
 
 class C4WebsocketConnectionTracker:
-    """Object that provides callables to manually refresh entity states if the Control4 Websocket is disconnected/reconnected."""
+    """Object that provides callables to manually refresh entity states if the Control4 Websocket is disconnected/reconnected.
+
+    pyControl4 2.x keeps a list of callbacks per item id (`C4Websocket.item_callbacks`), so each
+    one is called on its own, and one failing never stops the rest. An exception escaping the
+    disconnect callback aborts socket.io's disconnect handling before it schedules its reconnect,
+    leaving the websocket dead and every entity frozen at its last state until Home Assistant
+    restarts. A connection still down after RECONNECT_GRACE_SEC is rebuilt with a fresh Director
+    token, retried with backoff until it comes back.
+    """
+
+    RECONNECT_GRACE_SEC = 30
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the state of the connection tracker object."""
@@ -288,30 +298,54 @@ class C4WebsocketConnectionTracker:
         self.entry = entry
 
         self._was_disconnected = False
+        self._cancel_heal = None
+
+    def _callbacks(self):
+        """Every (item id, callback) pair registered on the websocket, list or single."""
+        entry_data = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id)
+        if not entry_data or CONF_WEBSOCKET not in entry_data:
+            return []
+        pairs = []
+        for item_id, callbacks in list(entry_data[CONF_WEBSOCKET].item_callbacks.items()):
+            if callable(callbacks):
+                callbacks = [callbacks]
+            for callback in list(callbacks):
+                pairs.append((item_id, callback))
+        return pairs
 
     async def connect_callback(self) -> None:
         """Manually refresh entity states when the Websocket is reconnected after a connection drop."""
+        if self._cancel_heal is not None:
+            self._cancel_heal()
+            self._cancel_heal = None
         if not self._was_disconnected:
             return
 
-        _LOGGER.info("Websocket connection to Control4 reestablished")
+        _LOGGER.warning("Websocket connection to Control4 reestablished")
+        self._was_disconnected = False
 
         # Refresh state of entities so they are not unavailable anymore
-        item_callbacks = self.hass.data[DOMAIN][self.entry.entry_id][
-            CONF_WEBSOCKET
-        ].item_callbacks
-        for item_id, callback in item_callbacks.items():
-            item_attributes = await director_get_entry_variables(
-                self.hass, self.entry, item_id
-            )
+        by_item = {}
+        for item_id, callback in self._callbacks():
+            by_item.setdefault(item_id, []).append(callback)
+        for item_id, callbacks in by_item.items():
+            try:
+                item_attributes = await director_get_entry_variables(
+                    self.hass, self.entry, item_id
+                )
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning("Could not refresh Control4 item %s after reconnecting", item_id, exc_info=True)
+                continue
             message = {
                 "evtName": "OnDataToUI",
                 "iddevice": item_id,
                 "data": item_attributes,
             }
-            await callback(item_id, message)
-
-        self._was_disconnected = False
+            for callback in callbacks:
+                try:
+                    await callback(item_id, message)
+                except Exception:  # noqa: BLE001
+                    _LOGGER.warning("Control4 item %s refresh callback failed", item_id, exc_info=True)
 
     async def disconnect_callback(self) -> None:
         """Detect a Websocket connection loss."""
@@ -320,12 +354,34 @@ class C4WebsocketConnectionTracker:
         )
         self._was_disconnected = True
 
-        # Set all entities to unavailable
-        item_callbacks = self.hass.data[DOMAIN][self.entry.entry_id][
-            CONF_WEBSOCKET
-        ].item_callbacks
-        for item_id, callback in item_callbacks.items():
-            await callback(item_id, False)
+        # Set all entities to unavailable, each on its own
+        for item_id, callback in self._callbacks():
+            try:
+                await callback(item_id, False)
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning("Control4 item %s unavailable callback failed", item_id, exc_info=True)
+
+        if self._cancel_heal is None:
+            self._cancel_heal = async_call_later(
+                hass=self.hass, delay=self.RECONNECT_GRACE_SEC, action=self._heal
+            )
+
+    async def _heal(self, _now=None) -> None:
+        """Still down after the grace: reconnect with a fresh Director token."""
+        self._cancel_heal = None
+        if not self._was_disconnected:
+            return
+        entry_data = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id)
+        if not entry_data:
+            return
+        _LOGGER.warning(
+            "Control4 websocket still down after %s s; reconnecting with a fresh token",
+            self.RECONNECT_GRACE_SEC,
+        )
+        cancel = entry_data.get(CONF_CANCEL_TOKEN_REFRESH_CALLBACK)
+        if cancel is not None:
+            cancel()
+        await RefreshTokensObject(self.hass, self.entry)._refresh_token_with_retry()
 
 
 class RefreshTokensObject:
