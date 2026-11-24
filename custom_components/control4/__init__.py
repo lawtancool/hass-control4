@@ -303,6 +303,25 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
 
 
 
+def _iter_item_callbacks(hass: HomeAssistant, entry: ConfigEntry):
+    """Every (item id, callback) pair registered on the websocket, list or single.
+
+    pyControl4 2.x keeps a list of callbacks per item id
+    (`C4Websocket.item_callbacks`), so each one is called on its own, and one
+    failing never stops the rest.
+    """
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if not entry_data or CONF_WEBSOCKET not in entry_data:
+        return []
+    pairs = []
+    for item_id, callbacks in list(entry_data[CONF_WEBSOCKET].item_callbacks.items()):
+        if callable(callbacks):
+            callbacks = [callbacks]
+        for callback in list(callbacks):
+            pairs.append((item_id, callback))
+    return pairs
+
+
 async def refresh_entity_states(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Re-fetch current state for every registered item from the director.
 
@@ -310,15 +329,25 @@ async def refresh_entity_states(hass: HomeAssistant, entry: ConfigEntry) -> None
     from the director's live variables. Uses the director REST API, so it
     heals stale states even when the websocket is down.
     """
-    item_callbacks = hass.data[DOMAIN][entry.entry_id][CONF_WEBSOCKET].item_callbacks
-    for item_id, callback in item_callbacks.items():
-        item_attributes = await director_get_entry_variables(hass, entry, item_id)
+    by_item = {}
+    for item_id, callback in _iter_item_callbacks(hass, entry):
+        by_item.setdefault(item_id, []).append(callback)
+    for item_id, callbacks in by_item.items():
+        try:
+            item_attributes = await director_get_entry_variables(hass, entry, item_id)
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("Could not refresh Control4 item %s", item_id, exc_info=True)
+            continue
         message = {
             "evtName": "OnDataToUI",
             "iddevice": item_id,
             "data": item_attributes,
         }
-        await callback(item_id, message)
+        for callback in callbacks:
+            try:
+                await callback(item_id, message)
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning("Control4 item %s refresh callback failed", item_id, exc_info=True)
 
 
 class C4WebsocketConnectionTracker:

@@ -37,6 +37,4 @@ CONTROL4_ENTITY_TYPE = 7
 RETRY_BACKOFF_MAX_SEC = 30
 SCHEDULE_REFRESH_ADVANCE_SEC = 300
 
-# Re-fetch entity states from the director this often, so a dropped websocket
-# (or silently dead subscription) cannot leave states frozen for long.
 DIRECTOR_POLL_INTERVAL = timedelta(minutes=5)
