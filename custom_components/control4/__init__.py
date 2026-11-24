@@ -87,6 +87,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await refresh_tokens(hass, entry)
     # Copy controller unique id from config to entry_data for use by entities
     entry_data[CONF_CONTROLLER_UNIQUE_ID] = config[CONF_CONTROLLER_UNIQUE_ID]
+    entry_data["config_entry_id"] = entry.entry_id
 
     # Add Control4 controller to device registry
     try:
@@ -458,12 +459,16 @@ class Control4Entity(Entity):
     @cached_property
     def device_info(self) -> DeviceInfo:
         """Return info of parent Control4 device of entity."""
+        controller = dr.async_get(self.hass).async_get_device_by_identifier(
+            (DOMAIN, self._controller_unique_id),
+            self.entry_data["config_entry_id"],
+        )
         return DeviceInfo(
             identifiers={(DOMAIN, str(self._device_id))},
             manufacturer=self._device_manufacturer,
             model=self._device_model,
             name=self._device_name,
-            via_device=(DOMAIN, self._controller_unique_id),
+            via_device_id=controller.id if controller else None,
             suggested_area=self._device_area,
         )
 
@@ -508,12 +513,16 @@ class Control4CoordinatorEntity(CoordinatorEntity[Any]):
     @cached_property
     def device_info(self) -> DeviceInfo:
         """Return info of parent Control4 device of entity."""
+        controller = dr.async_get(self.hass).async_get_device_by_identifier(
+            (DOMAIN, self._controller_unique_id),
+            self.entry_data["config_entry_id"],
+        )
         return DeviceInfo(
             identifiers={(DOMAIN, str(self._device_id))},
             manufacturer=self._device_manufacturer,
             model=self._device_model,
             name=self._device_name,
-            via_device=(DOMAIN, self._controller_unique_id),
+            via_device_id=controller.id if controller else None,
             suggested_area=self._device_area,
         )
 
