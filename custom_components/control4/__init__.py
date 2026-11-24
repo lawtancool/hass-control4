@@ -1,12 +1,5 @@
 """The Control4 integration."""
 
-# Fork note (vrizopoulos/hass-control4, based on lawtancool/hass-control4 v1.7.0):
-# Modified from upstream: use via_device_id instead of the deprecated via_device
-# tuple, and async_get_device_by_identifier instead of the deprecated
-# async_get_device (which stops working in Home Assistant 2027.8.0).
-# See https://github.com/lawtancool/hass-control4/pull/86 for the via_device_id
-# part this builds on.
-
 from __future__ import annotations
 
 import asyncio
@@ -97,7 +90,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await refresh_tokens(hass, entry)
     # Copy controller unique id from config to entry_data for use by entities
     entry_data[CONF_CONTROLLER_UNIQUE_ID] = config[CONF_CONTROLLER_UNIQUE_ID]
-    entry_data["config_entry_id"] = entry.entry_id
 
     # Add Control4 controller to device registry
     try:
@@ -310,6 +302,7 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
     )
 
 
+
 async def refresh_entity_states(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Re-fetch current state for every registered item from the director.
 
@@ -495,16 +488,12 @@ class Control4Entity(Entity):
     @cached_property
     def device_info(self) -> DeviceInfo:
         """Return info of parent Control4 device of entity."""
-        controller = dr.async_get(self.hass).async_get_device_by_identifier(
-            (DOMAIN, self._controller_unique_id),
-            self.entry_data["config_entry_id"],
-        )
         return DeviceInfo(
             identifiers={(DOMAIN, str(self._device_id))},
             manufacturer=self._device_manufacturer,
             model=self._device_model,
             name=self._device_name,
-            via_device_id=controller.id if controller else None,
+            via_device=(DOMAIN, self._controller_unique_id),
             suggested_area=self._device_area,
         )
 
@@ -549,16 +538,12 @@ class Control4CoordinatorEntity(CoordinatorEntity[Any]):
     @cached_property
     def device_info(self) -> DeviceInfo:
         """Return info of parent Control4 device of entity."""
-        controller = dr.async_get(self.hass).async_get_device_by_identifier(
-            (DOMAIN, self._controller_unique_id),
-            self.entry_data["config_entry_id"],
-        )
         return DeviceInfo(
             identifiers={(DOMAIN, str(self._device_id))},
             manufacturer=self._device_manufacturer,
             model=self._device_model,
             name=self._device_name,
-            via_device_id=controller.id if controller else None,
+            via_device=(DOMAIN, self._controller_unique_id),
             suggested_area=self._device_area,
         )
 
