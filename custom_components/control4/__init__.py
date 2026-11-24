@@ -14,11 +14,12 @@ import logging
 from functools import cached_property
 from typing import Any
 import random
+from datetime import datetime
 
 from aiohttp import client_exceptions
 from pyControl4.account import C4Account
 from pyControl4.director import C4Director
-from pyControl4.error_handling import BadCredentials, InvalidCategory
+from pyControl4.error_handling import BadCredentials, C4Exception, InvalidCategory
 from pyControl4.websocket import C4Websocket
 
 from homeassistant.config_entries import ConfigEntry
@@ -35,7 +36,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client, device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
-from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,
@@ -50,6 +51,7 @@ from .const import (
     CONF_ALARM_NIGHT_MODE,
     CONF_ALARM_VACATION_MODE,
     CONF_CANCEL_TOKEN_REFRESH_CALLBACK,
+    CONF_CANCEL_DIRECTOR_POLL_CALLBACK,
     CONF_CONFIG_LISTENER,
     CONF_CONTROLLER_UNIQUE_ID,
     CONF_DIRECTOR,
@@ -67,6 +69,7 @@ from .const import (
     DOMAIN,
     RETRY_BACKOFF_MAX_SEC,
     SCHEDULE_REFRESH_ADVANCE_SEC,
+    DIRECTOR_POLL_INTERVAL,
 )
 from .director_utils import director_get_entry_variables
 
@@ -168,6 +171,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    async def _director_poll(now: datetime) -> None:
+        """Periodically re-fetch entity states from the director.
+
+        The websocket can drop (or its subscription silently die) without HA
+        noticing, leaving entity states frozen until the next reconnect. This
+        poll heals that within DIRECTOR_POLL_INTERVAL by refreshing states
+        over the director REST API, which is independent of the websocket.
+        """
+        _LOGGER.debug("Polling director for entity states")
+        try:
+            await refresh_entity_states(hass, entry)
+        except (client_exceptions.ClientError, asyncio.TimeoutError, C4Exception) as err:
+            _LOGGER.debug("Director poll failed: %s", err)
+
+    entry_data[CONF_CANCEL_DIRECTOR_POLL_CALLBACK] = async_track_time_interval(
+        hass, _director_poll, DIRECTOR_POLL_INTERVAL
+    )
+
     return True
 
 
@@ -180,6 +201,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await entry_data[CONF_WEBSOCKET].sio_disconnect()
     _LOGGER.debug("Cancelling scheduled token refresh for config entry unload")
     entry_data[CONF_CANCEL_TOKEN_REFRESH_CALLBACK]()
+    _LOGGER.debug("Cancelling director poll for config entry unload")
+    entry_data[CONF_CANCEL_DIRECTOR_POLL_CALLBACK]()
 
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
@@ -287,6 +310,24 @@ async def refresh_tokens(hass: HomeAssistant, entry: ConfigEntry):
     )
 
 
+async def refresh_entity_states(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Re-fetch current state for every registered item from the director.
+
+    Fires each item's registered callbacks with an OnDataToUI message built
+    from the director's live variables. Uses the director REST API, so it
+    heals stale states even when the websocket is down.
+    """
+    item_callbacks = hass.data[DOMAIN][entry.entry_id][CONF_WEBSOCKET].item_callbacks
+    for item_id, callback in item_callbacks.items():
+        item_attributes = await director_get_entry_variables(hass, entry, item_id)
+        message = {
+            "evtName": "OnDataToUI",
+            "iddevice": item_id,
+            "data": item_attributes,
+        }
+        await callback(item_id, message)
+
+
 class C4WebsocketConnectionTracker:
     """Object that provides callables to manually refresh entity states if the Control4 Websocket is disconnected/reconnected."""
 
@@ -305,19 +346,7 @@ class C4WebsocketConnectionTracker:
         _LOGGER.info("Websocket connection to Control4 reestablished")
 
         # Refresh state of entities so they are not unavailable anymore
-        item_callbacks = self.hass.data[DOMAIN][self.entry.entry_id][
-            CONF_WEBSOCKET
-        ].item_callbacks
-        for item_id, callback in item_callbacks.items():
-            item_attributes = await director_get_entry_variables(
-                self.hass, self.entry, item_id
-            )
-            message = {
-                "evtName": "OnDataToUI",
-                "iddevice": item_id,
-                "data": item_attributes,
-            }
-            await callback(item_id, message)
+        await refresh_entity_states(self.hass, self.entry)
 
         self._was_disconnected = False
 
